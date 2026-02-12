@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>寄付完了</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .thanks-hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+
+    .thanks-hero .container {
+      padding-top: 54px;
+      padding-bottom: 54px;
+      text-align: center;
+    }
+
+    .thanks-hero h1 {
+      font-size: 2.2rem;
+      margin-bottom: 8px;
+    }
+
+    .thanks-hero p {
+      max-width: 740px;
+      margin: 0 auto;
+    }
+
+    .thanks-wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .thanks-message {
+      margin-bottom: 14px;
+      line-height: 1.8;
+    }
+
+    .name {
+      font-weight: 700;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .btn-donate {
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-sub {
+      display: inline-block;
+      text-decoration: none;
+      border-radius: 999px;
+      padding: 14px 30px;
+      font-weight: bold;
+      border: 1px solid #f0c58a;
+      color: #e86b12;
+      background: #fff7eb;
+      transition: 0.2s ease;
+    }
+
+    .btn-sub:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(242, 140, 40, 0.2);
+    }
+
+    @media (max-width: 640px) {
+      .thanks-hero h1 {
+        font-size: 1.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="thanks-hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <h1>寄付ありがとうございました</h1>
+      <p>あたたかいご支援に感謝します。受領書は下のボタンからダウンロードできます。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container thanks-wrap">
+      <div class="card">
+        <p class="thanks-message"><span class="name">{{ name }}</span> 様、ご支援ありがとうございます。</p>
+        <p class="thanks-message">証明書番号：<span class="name">{{ certificate_no }}</span></p>
+        <p class="thanks-message">受領書PDFはご入力のメールアドレスへ送信しました。</p>
+        <div class="actions">
+          <a class="btn-donate" href="/download/{{ token }}">受領書PDFをダウンロード</a>
+          <a class="btn-donate" href="/donation/">寄付ページへ戻る</a>
+          <a class="btn-sub" href="/">トップページへ戻る</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>寄附フォーム</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/style.css">
+    <style>
+        .donation-hero {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+        }
+
+        .donation-hero .container {
+            padding-top: 54px;
+            padding-bottom: 54px;
+        }
+
+        .donation-hero h1 {
+            text-align: center;
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+
+        .donation-hero p {
+            text-align: center;
+            margin: 0 auto;
+            max-width: 760px;
+        }
+
+        .donation-form-wrap {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+
+        .donation-form {
+            margin-top: 8px;
+        }
+
+        .form-label {
+            display: block;
+            margin-top: 16px;
+            font-weight: 700;
+            color: #3a2a1f;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 12px 14px;
+            margin-top: 8px;
+            border: 1px solid #efdfc9;
+            border-radius: 10px;
+            background: #fff;
+            font-size: 1rem;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: #f28c28;
+            box-shadow: 0 0 0 3px rgba(242, 140, 40, 0.2);
+        }
+
+        .help-text {
+            margin-top: 14px;
+            font-size: 0.95rem;
+            color: #5f4b3d;
+        }
+
+        .submit-row {
+            margin-top: 24px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .submit-row .btn-donate {
+            border: none;
+            cursor: pointer;
+        }
+
+        .home-link {
+            color: #e86b12;
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .home-link:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 640px) {
+            .donation-hero h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<header class="donation-hero">
+    <div class="light-rays"></div>
+    <div class="container">
+        <h1>寄附フォーム</h1>
+        <p>ご支援ありがとうございます。必要事項をご入力のうえ送信してください。受領書PDFはメール送付され、送信後の画面からもダウンロードできます。</p>
+    </div>
+</header>
+
+<section class="section bg-light">
+    <div class="container donation-form-wrap">
+        <div class="card">
+            <form class="donation-form" method="POST" action="/submit">
+                <label class="form-label">
+                    お名前
+                    <input class="form-input" type="text" name="name" placeholder="匿名可">
+                </label>
+
+                <label class="form-label">
+                    メールアドレス
+                    <input class="form-input" type="email" name="email" required>
+                </label>
+
+                <label class="form-label">
+                    ご住所
+                    <input class="form-input" type="text" name="address" required placeholder="例: 京都市伏見区...">
+                </label>
+
+                <label class="form-label">
+                    寄附金額（円）
+                    <input class="form-input" type="number" name="amount" required min="1">
+                </label>
+
+                <label class="form-label">
+                    支払方法
+                    <select class="form-select" name="payment_method">
+                        <option value="クレジットカード">クレジットカード</option>
+                        <option value="現金">現金</option>
+                        <option value="銀行振込">銀行振込</option>
+                    </select>
+                </label>
+
+                <p class="help-text">送信後に確認ページが表示されます。</p>
+                <div class="submit-row">
+                    <button class="btn-donate large" type="submit">寄附する</button>
+                    <a class="home-link" href="/">トップページへ戻る</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+</body>
+</html>

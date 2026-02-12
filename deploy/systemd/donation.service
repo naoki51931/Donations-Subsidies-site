@@ -1,0 +1,19 @@
+[Unit]
+Description=Gunicorn service for donation Flask app
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/home/ubuntu/taichi_support_donation_site02/donation
+EnvironmentFile=/home/ubuntu/taichi_support_donation_site02/donation/.env
+ExecStart=/home/ubuntu/taichi_support_donation_site02/donation/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 127.0.0.1:5000 \
+    --timeout 60 \
+    app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
