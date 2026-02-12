@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>寄付データ編集</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .edit-hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .edit-hero .container {
+      padding-top: 40px;
+      padding-bottom: 40px;
+    }
+    .edit-wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .edit-form label {
+      display: block;
+      margin-top: 14px;
+      font-weight: 700;
+      color: #3a2a1f;
+    }
+    .edit-form input,
+    .edit-form select {
+      width: 100%;
+      margin-top: 8px;
+      padding: 11px 13px;
+      border: 1px solid #efdfc9;
+      border-radius: 8px;
+      background: #fff;
+      font-size: 0.96rem;
+    }
+    .edit-form input:focus,
+    .edit-form select:focus {
+      outline: none;
+      border-color: #f28c28;
+      box-shadow: 0 0 0 3px rgba(242, 140, 40, 0.2);
+    }
+    .readonly {
+      background: #fff6eb;
+      color: #5f4b3d;
+    }
+    .error {
+      margin-top: 12px;
+      color: #cc2f19;
+      font-weight: 700;
+    }
+    .actions {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .sub-btn {
+      border: 1px solid #f28c28;
+      background: #fff;
+      color: #f28c28;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <header class="edit-hero">
+    <div class="light-rays"></div>
+    <div class="container edit-wrap">
+      <h1>寄付データ編集</h1>
+      <p>証明書番号は固定です。その他の項目は更新できます。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container edit-wrap">
+      <div class="card">
+        {% if error %}
+        <p class="error">{{ error }}</p>
+        {% endif %}
+        <form class="edit-form" method="POST" action="/donation/admin/edit/{{ receipt_id }}">
+          <label>
+            証明書番号（編集不可）
+            <input class="readonly" type="text" value="{{ row.certificate_no or '' }}" readonly>
+          </label>
+          <label>
+            名前
+            <input type="text" name="donor_name" value="{{ row.donor_name or '' }}" required>
+          </label>
+          <label>
+            郵便番号
+            <input type="text" name="donor_postal_code" value="{{ row.donor_postal_code or '' }}" required>
+          </label>
+          <label>
+            住所
+            <input type="text" name="donor_address" value="{{ row.donor_address or '' }}" required>
+          </label>
+          <label>
+            メール
+            <input type="email" name="donor_email" value="{{ row.donor_email or '' }}" required>
+          </label>
+          <label>
+            金額
+            <input type="text" name="amount_yen" value="{{ row.amount_yen or '' }}" required>
+          </label>
+          <label>
+            支払方法
+            <select name="payment_method" required>
+              <option value="現金" {% if row.payment_method == "現金" %}selected{% endif %}>現金</option>
+              <option value="振込" {% if row.payment_method in ["振込", "銀行振込", "振り込み"] %}selected{% endif %}>振込</option>
+              <option value="クレジットカード" {% if row.payment_method == "クレジットカード" %}selected{% endif %}>クレジットカード</option>
+            </select>
+          </label>
+          <label>
+            状態
+            <select name="status" required>
+              <option value="created" {% if row.status == "created" %}selected{% endif %}>created</option>
+              <option value="issued" {% if row.status == "issued" %}selected{% endif %}>issued</option>
+              <option value="mail_failed" {% if row.status == "mail_failed" %}selected{% endif %}>mail_failed</option>
+              {% if row.status and row.status not in ["created", "issued", "mail_failed"] %}
+              <option value="{{ row.status }}" selected>{{ row.status }}</option>
+              {% endif %}
+            </select>
+          </label>
+          <label>
+            寄付日時
+            <input type="datetime-local" name="donated_at" value="{{ (row.donated_at|string)[:16]|replace(' ', 'T') if row.donated_at else '' }}" required>
+          </label>
+          <label>
+            作成日時
+            <input type="datetime-local" name="created_at" value="{{ (row.created_at|string)[:16]|replace(' ', 'T') if row.created_at else '' }}" required>
+          </label>
+          <div class="actions">
+            <button class="btn-donate" type="submit">保存</button>
+            <a class="sub-btn" href="/donation/admin">戻る</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

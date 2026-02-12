@@ -1,6 +1,7 @@
 import io
 import os
 import smtplib
+from functools import wraps
 from pathlib import Path
 from datetime import datetime
 from email.message import EmailMessage
@@ -9,7 +10,17 @@ from uuid import uuid4
 
 import pymysql
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, send_from_directory
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    session,
+)
 from werkzeug.middleware.proxy_fix import ProxyFix
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
@@ -19,6 +30,7 @@ from reportlab.pdfgen import canvas
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", uuid4().hex)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.json.ensure_ascii = False
 default_receipt_dir = f"/tmp/donation_receipts_{os.geteuid()}"
@@ -43,6 +55,12 @@ DB_USER = os.getenv("DB_USER", "kifukin_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_NAME = os.getenv("DB_NAME", "donation")
 CREDIT_CARD_INPUT_URL = os.getenv("CREDIT_CARD_INPUT_URL", "").strip()
+PUBLIC_DONATION_PREFIX = os.getenv("PUBLIC_DONATION_PREFIX", "/donation").rstrip("/")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+USER_USERNAME = os.getenv("USER_USERNAME", "user").strip() or "user"
+USER_PASSWORD = os.getenv("USER_PASSWORD", "")
+ALLOWED_PAYMENT_METHODS = {"現金", "振込", "クレジットカード"}
 
 
 def parse_multiline_env(value: str) -> str:
@@ -65,7 +83,35 @@ def parse_multiline_env(value: str) -> str:
 BANK_TRANSFER_INFO = parse_multiline_env(os.getenv("BANK_TRANSFER_INFO", ""))
 
 
+def get_dashboard_users() -> dict[str, str]:
+    users: dict[str, str] = {}
+    if ADMIN_PASSWORD:
+        users[ADMIN_USERNAME] = ADMIN_PASSWORD
+    if USER_PASSWORD:
+        users[USER_USERNAME] = USER_PASSWORD
+    return users
+
+
+def require_dashboard_login(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not session.get("dashboard_user"):
+            return redirect(public_admin_path("/login"))
+        return view_func(*args, **kwargs)
+
+    return wrapped
+
+
+def public_admin_path(path: str = "") -> str:
+    base = PUBLIC_DONATION_PREFIX or ""
+    if path and not path.startswith("/"):
+        path = f"/{path}"
+    return f"{base}/admin{path}"
+
+
 @app.route("/", methods=["GET"])
+@app.route("/donation", methods=["GET"])
+@app.route("/donation/", methods=["GET"])
 def form_page():
     return send_from_directory(".", "index.html")
 
@@ -112,11 +158,16 @@ def build_receipt_pdf(
 def draw_issuer_assets(c: canvas.Canvas) -> None:
     c.setFont("HeiseiKakuGo-W5", 10)
     y_label = 140
-    c.drawString(60, y_label, "発行者印")
-    c.drawString(250, y_label, "代表者署名")
+    has_seal = SEAL_IMAGE_PATH.exists()
+    has_signature = SIGNATURE_IMAGE_PATH.exists()
+
+    if has_seal:
+        c.drawString(60, y_label, "略印")
+    if has_signature:
+        c.drawString(250, y_label, "代表者署名")
 
     try:
-        if SEAL_IMAGE_PATH.exists():
+        if has_seal:
             c.drawImage(
                 str(SEAL_IMAGE_PATH),
                 x=60,
@@ -130,7 +181,7 @@ def draw_issuer_assets(c: canvas.Canvas) -> None:
         pass
 
     try:
-        if SIGNATURE_IMAGE_PATH.exists():
+        if has_signature:
             c.drawImage(
                 str(SIGNATURE_IMAGE_PATH),
                 x=250,
@@ -236,6 +287,7 @@ def ensure_receipts_table(conn) -> None:
         id BIGINT NOT NULL AUTO_INCREMENT,
         certificate_no VARCHAR(32) NOT NULL,
         donor_name VARCHAR(255) NOT NULL,
+        donor_postal_code VARCHAR(16) NOT NULL,
         donor_address VARCHAR(255) NOT NULL,
         donor_email VARCHAR(255) NOT NULL,
         amount_yen VARCHAR(64) NOT NULL,
@@ -243,6 +295,12 @@ def ensure_receipts_table(conn) -> None:
         donated_at DATETIME NOT NULL,
         download_token VARCHAR(64) DEFAULT NULL,
         status VARCHAR(32) NOT NULL DEFAULT 'created',
+        is_checked TINYINT(1) NOT NULL DEFAULT 0,
+        checked_at DATETIME DEFAULT NULL,
+        checked_by VARCHAR(64) DEFAULT NULL,
+        is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+        deleted_at DATETIME DEFAULT NULL,
+        deleted_by VARCHAR(64) DEFAULT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id),
         UNIQUE KEY uk_certificate_no (certificate_no),
@@ -251,12 +309,100 @@ def ensure_receipts_table(conn) -> None:
     """
     with conn.cursor() as cur:
         cur.execute(sql)
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='donor_postal_code'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN donor_postal_code VARCHAR(16) NOT NULL DEFAULT ''")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='donor_address'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN donor_address VARCHAR(255) NOT NULL DEFAULT ''")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='is_checked'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN is_checked TINYINT(1) NOT NULL DEFAULT 0")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='checked_at'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN checked_at DATETIME DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='checked_by'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN checked_by VARCHAR(64) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='is_deleted'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='deleted_at'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN deleted_at DATETIME DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='deleted_by'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN deleted_by VARCHAR(64) DEFAULT NULL")
     conn.commit()
 
 
 def create_receipt_record(
     conn,
     name: str,
+    postal_code: str,
     address: str,
     email: str,
     amount: str,
@@ -269,11 +415,11 @@ def create_receipt_record(
         cur.execute(
             """
             INSERT INTO donation_receipts (
-                certificate_no, donor_name, donor_address, donor_email, amount_yen,
+                certificate_no, donor_name, donor_postal_code, donor_address, donor_email, amount_yen,
                 payment_method, donated_at, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'created')
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'created')
             """,
-            (temp_certificate_no, name, address, email, amount, payment_method, donated_at),
+            (temp_certificate_no, name, postal_code, address, email, amount, payment_method, donated_at),
         )
         receipt_id = cur.lastrowid
         certificate_no = f"RCPT-{donated_at.year}-{receipt_id:06d}"
@@ -314,6 +460,7 @@ def save_receipt(pdf_bytes: bytes) -> str:
 
 
 @app.route("/download/<token>", methods=["GET"])
+@app.route("/donation/download/<token>", methods=["GET"])
 def download_receipt(token: str):
     receipt_path = RECEIPT_DIR / f"{token}.pdf"
     if not receipt_path.exists():
@@ -326,6 +473,265 @@ def download_receipt(token: str):
         download_name=f"寄付受領書_{timestamp}.pdf",
         mimetype="application/pdf",
     )
+
+
+@app.route("/admin/login", methods=["GET", "POST"])
+@app.route("/donation/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        users = get_dashboard_users()
+        if users.get(username) == password:
+            session["dashboard_user"] = username
+            return redirect(public_admin_path())
+        return render_template("admin_login.html", error="ユーザー名またはパスワードが違います。"), 401
+
+    if session.get("dashboard_user"):
+        return redirect(public_admin_path())
+    return render_template("admin_login.html")
+
+
+@app.route("/admin/logout", methods=["POST"])
+@app.route("/donation/admin/logout", methods=["POST"])
+def admin_logout():
+    session.pop("dashboard_user", None)
+    return redirect(public_admin_path("/login"))
+
+
+@app.route("/admin", methods=["GET"])
+@app.route("/donation/admin", methods=["GET"])
+@require_dashboard_login
+def admin_dashboard():
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS total FROM donation_receipts WHERE is_deleted=0")
+            total = cur.fetchone()["total"]
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    certificate_no,
+                    donor_name,
+                    donor_postal_code,
+                    donor_address,
+                    donor_email,
+                    amount_yen,
+                    payment_method,
+                    status,
+                    is_checked,
+                    checked_at,
+                    checked_by,
+                    is_deleted,
+                    deleted_at,
+                    deleted_by,
+                    donated_at,
+                    created_at
+                FROM donation_receipts
+                WHERE is_deleted=0
+                ORDER BY id DESC
+                LIMIT 100
+                """
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        return render_template(
+            "admin_dashboard.html",
+            total=0,
+            rows=[],
+            current_user=session.get("dashboard_user", ""),
+            db_error=str(exc),
+        )
+    finally:
+        if conn:
+            conn.close()
+
+    return render_template(
+        "admin_dashboard.html",
+        total=total,
+        rows=rows,
+        current_user=session.get("dashboard_user", ""),
+        db_error=None,
+    )
+
+
+@app.route("/admin/confirm/<int:receipt_id>", methods=["POST"])
+@app.route("/donation/admin/confirm/<int:receipt_id>", methods=["POST"])
+@require_dashboard_login
+def admin_confirm(receipt_id: int):
+    checked = "1" in request.form.getlist("checked")
+    current_user = session.get("dashboard_user", "")
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        with conn.cursor() as cur:
+            if checked:
+                cur.execute(
+                    """
+                    UPDATE donation_receipts
+                    SET is_checked=1, checked_at=NOW(), checked_by=%s
+                    WHERE id=%s AND is_deleted=0
+                    """,
+                    (current_user, receipt_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE donation_receipts
+                    SET is_checked=0, checked_at=NULL, checked_by=NULL
+                    WHERE id=%s AND is_deleted=0
+                    """,
+                    (receipt_id,),
+                )
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
+@app.route("/admin/delete/<int:receipt_id>", methods=["POST"])
+@app.route("/donation/admin/delete/<int:receipt_id>", methods=["POST"])
+@require_dashboard_login
+def admin_delete(receipt_id: int):
+    current_user = session.get("dashboard_user", "")
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE donation_receipts
+                SET is_deleted=1, deleted_at=NOW(), deleted_by=%s
+                WHERE id=%s
+                """,
+                (current_user, receipt_id),
+            )
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
+@app.route("/admin/edit/<int:receipt_id>", methods=["GET", "POST"])
+@app.route("/donation/admin/edit/<int:receipt_id>", methods=["GET", "POST"])
+@require_dashboard_login
+def admin_edit(receipt_id: int):
+    def parse_dt(value: str) -> datetime:
+        normalized = (value or "").strip().replace(" ", "T")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError as exc:
+            raise ValueError("日時形式が不正です。") from exc
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        with conn.cursor() as cur:
+            if request.method == "POST":
+                donor_name = request.form.get("donor_name", "").strip() or "匿名"
+                donor_postal_code = request.form.get("donor_postal_code", "").strip()
+                donor_address = request.form.get("donor_address", "").strip()
+                donor_email = request.form.get("donor_email", "").strip()
+                amount_yen = request.form.get("amount_yen", "").strip()
+                payment_method = request.form.get("payment_method", "").strip()
+                status = request.form.get("status", "").strip()
+                donated_at_raw = request.form.get("donated_at", "").strip()
+                created_at_raw = request.form.get("created_at", "").strip()
+
+                if (
+                    not donor_postal_code
+                    or not donor_address
+                    or not donor_email
+                    or not amount_yen
+                    or not payment_method
+                    or not status
+                    or not donated_at_raw
+                    or not created_at_raw
+                ):
+                    raise ValueError("必須項目が未入力です。")
+                if payment_method not in ALLOWED_PAYMENT_METHODS:
+                    raise ValueError("支払方法は 現金 / 振込 / クレジットカード から選択してください。")
+
+                donated_at = parse_dt(donated_at_raw)
+                created_at = parse_dt(created_at_raw)
+
+                cur.execute(
+                    """
+                    UPDATE donation_receipts
+                    SET
+                        donor_name=%s,
+                        donor_postal_code=%s,
+                        donor_address=%s,
+                        donor_email=%s,
+                        amount_yen=%s,
+                        payment_method=%s,
+                        status=%s,
+                        donated_at=%s,
+                        created_at=%s
+                    WHERE id=%s AND is_deleted=0
+                    """,
+                    (
+                        donor_name,
+                        donor_postal_code,
+                        donor_address,
+                        donor_email,
+                        amount_yen,
+                        payment_method,
+                        status,
+                        donated_at,
+                        created_at,
+                        receipt_id,
+                    ),
+                )
+                conn.commit()
+                return redirect(public_admin_path())
+
+            cur.execute(
+                """
+                SELECT
+                    id,
+                    certificate_no,
+                    donor_name,
+                    donor_postal_code,
+                    donor_address,
+                    donor_email,
+                    amount_yen,
+                    payment_method,
+                    status,
+                    donated_at,
+                    created_at
+                FROM donation_receipts
+                WHERE id=%s AND is_deleted=0
+                LIMIT 1
+                """,
+                (receipt_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                abort(404, description="対象データが見つかりません。")
+    except ValueError as exc:
+        return render_template("admin_edit.html", row=request.form, receipt_id=receipt_id, error=str(exc)), 400
+    except Exception as exc:
+        return render_template("admin_edit.html", row={}, receipt_id=receipt_id, error=str(exc)), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return render_template("admin_edit.html", row=row, receipt_id=receipt_id, error=None)
 
 
 @app.route("/db-check", methods=["GET"])
@@ -359,9 +765,12 @@ def db_check_receipts():
     conn = None
     try:
         conn = get_db_connection()
+        ensure_receipts_table(conn)
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) AS total FROM donation_receipts")
+            cur.execute("SELECT COUNT(*) AS total FROM donation_receipts WHERE is_deleted=0")
             total = cur.fetchone()["total"]
+            cur.execute("SELECT COUNT(*) AS total_deleted FROM donation_receipts WHERE is_deleted=1")
+            total_deleted = cur.fetchone()["total_deleted"]
 
             cur.execute(
                 """
@@ -369,20 +778,29 @@ def db_check_receipts():
                     id,
                     certificate_no,
                     donor_name,
+                    donor_postal_code,
+                    donor_address,
                     donor_email,
                     amount_yen,
                     payment_method,
                     status,
+                    is_checked,
+                    checked_at,
+                    checked_by,
+                    is_deleted,
+                    deleted_at,
+                    deleted_by,
                     donated_at,
                     created_at
                 FROM donation_receipts
+                WHERE is_deleted=0
                 ORDER BY id DESC
                 LIMIT 20
                 """
             )
             rows = cur.fetchall()
 
-        return jsonify({"ok": True, "total": total, "rows": rows}), 200
+        return jsonify({"ok": True, "total": total, "total_deleted": total_deleted, "rows": rows}), 200
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
     finally:
@@ -392,15 +810,20 @@ def db_check_receipts():
 
 @app.route("/submit", methods=["POST"])
 @app.route("/submit/", methods=["POST"])
+@app.route("/donation/submit", methods=["POST"])
+@app.route("/donation/submit/", methods=["POST"])
 def submit():
     name = request.form.get("name", "匿名").strip() or "匿名"
+    postal_code = request.form.get("postal_code", "").strip()
     address = request.form.get("address", "").strip()
     email = request.form.get("email", "").strip()
     amount = request.form.get("amount", "").strip()
     payment_method = request.form.get("payment_method", "未指定").strip() or "未指定"
 
-    if not address or not email or not amount:
-        abort(400, description="address / email / amount は必須です。")
+    if not postal_code or not address or not email or not amount:
+        abort(400, description="postal_code / address / email / amount は必須です。")
+    if payment_method not in ALLOWED_PAYMENT_METHODS:
+        abort(400, description="payment_method は 現金 / 振込 / クレジットカード のみ指定できます。")
 
     donated_at = datetime.now()
 
@@ -411,6 +834,7 @@ def submit():
         receipt_id, certificate_no = create_receipt_record(
             conn=conn,
             name=name,
+            postal_code=postal_code,
             address=address,
             email=email,
             amount=amount,
@@ -492,6 +916,7 @@ def submit():
 
 
 @app.route("/payment/credit-card", methods=["GET"])
+@app.route("/donation/payment/credit-card", methods=["GET"])
 def credit_card_input_page():
     certificate_no = request.args.get("certificate_no", "").strip()
     return render_template("credit_card.html", certificate_no=certificate_no)

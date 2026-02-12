@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理画面</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .admin-hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .admin-hero .container {
+      padding-top: 38px;
+      padding-bottom: 38px;
+    }
+    .head-row {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .meta {
+      color: #5f4b3d;
+      margin-top: 6px;
+      font-size: 0.95rem;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    th, td {
+      border-bottom: 1px solid #f0e0cd;
+      text-align: left;
+      padding: 10px 8px;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      color: #3a2a1f;
+      background: #fff7eb;
+      position: sticky;
+      top: 0;
+    }
+    .db-error {
+      margin-top: 10px;
+      color: #cc2f19;
+      font-weight: 700;
+    }
+    .logout-btn {
+      border: 1px solid #e48822;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .check-cell form {
+      margin: 0;
+    }
+    .check-box {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #f28c28;
+      background: #fff;
+      border-radius: 4px;
+      position: relative;
+      cursor: pointer;
+    }
+    .check-box:checked {
+      background: #f28c28;
+    }
+    .check-box:checked::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      top: 0px;
+      width: 5px;
+      height: 10px;
+      border: solid #fff;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+    .check-meta {
+      margin-top: 4px;
+      color: #5f4b3d;
+      font-size: 0.8rem;
+      white-space: normal;
+      line-height: 1.4;
+    }
+    .delete-btn {
+      border: 1px solid #f28c28;
+      background: #fff;
+      color: #f28c28;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .action-cell {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .action-cell form {
+      margin: 0;
+    }
+    .edit-btn {
+      border: 1px solid #f28c28;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-block;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <header class="admin-hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <div class="head-row">
+        <div>
+          <h1>寄付 管理画面</h1>
+          <p class="meta">ログイン中: {{ current_user }} / 合計件数: {{ total }}</p>
+        </div>
+        <form method="POST" action="/donation/admin/logout">
+          <button class="logout-btn" type="submit">ログアウト</button>
+        </form>
+      </div>
+      {% if db_error %}
+      <p class="db-error">DBエラー: {{ db_error }}</p>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container">
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>証明書番号</th>
+                <th>名前</th>
+                <th>郵便番号</th>
+                <th>住所</th>
+                <th>メール</th>
+                <th>金額</th>
+                <th>支払方法</th>
+                <th>状態</th>
+                <th>確認</th>
+                <th>操作</th>
+                <th>寄付日時</th>
+                <th>作成日時</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+              <tr>
+                <td>{{ row.id }}</td>
+                <td>{{ row.certificate_no }}</td>
+                <td>{{ row.donor_name }}</td>
+                <td>{{ row.donor_postal_code }}</td>
+                <td>{{ row.donor_address }}</td>
+                <td>{{ row.donor_email }}</td>
+                <td>{{ row.amount_yen }}</td>
+                <td>{{ row.payment_method }}</td>
+                <td>{{ row.status }}</td>
+                <td class="check-cell">
+                  <form method="POST" action="/donation/admin/confirm/{{ row.id }}">
+                    <input type="hidden" name="checked" value="0">
+                    <input
+                      class="check-box"
+                      type="checkbox"
+                      name="checked"
+                      value="1"
+                      {% if row.is_checked %}checked{% endif %}
+                      onchange="this.form.submit()"
+                    >
+                  </form>
+                  {% if row.checked_at %}
+                  <div class="check-meta">{{ row.checked_at }} / {{ row.checked_by or "-" }}</div>
+                  {% endif %}
+                </td>
+                <td class="action-cell">
+                  <a class="edit-btn" href="/donation/admin/edit/{{ row.id }}">編集</a>
+                  <form method="POST" action="/donation/admin/delete/{{ row.id }}" onsubmit="return confirm('このデータを一覧から削除します（論理削除）。よろしいですか？');">
+                    <button class="delete-btn" type="submit">削除</button>
+                  </form>
+                </td>
+                <td>{{ row.donated_at }}</td>
+                <td>{{ row.created_at }}</td>
+              </tr>
+              {% endfor %}
+              {% if not rows %}
+              <tr>
+                <td colspan="13">データがありません。</td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

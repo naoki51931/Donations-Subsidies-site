@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理ログイン</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .admin-hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .admin-hero .container {
+      padding-top: 54px;
+      padding-bottom: 54px;
+      text-align: center;
+    }
+    .login-wrap {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .login-form label {
+      display: block;
+      margin-top: 14px;
+      font-weight: 700;
+      color: #3a2a1f;
+    }
+    .login-form input {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px 14px;
+      border: 1px solid #efdfc9;
+      border-radius: 10px;
+      background: #fff;
+      font-size: 1rem;
+    }
+    .login-form input:focus {
+      outline: none;
+      border-color: #f28c28;
+      box-shadow: 0 0 0 3px rgba(242, 140, 40, 0.2);
+    }
+    .error {
+      margin-top: 14px;
+      color: #cc2f19;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <header class="admin-hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <h1>管理画面ログイン</h1>
+      <p>登録済みの user / admin でログインしてください。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container login-wrap">
+      <div class="card">
+        {% if error %}
+        <p class="error">{{ error }}</p>
+        {% endif %}
+        <form class="login-form" method="POST" action="/donation/admin/login">
+          <label>
+            ユーザー名
+            <input type="text" name="username" autocomplete="username" required>
+          </label>
+          <label>
+            パスワード
+            <input type="password" name="password" autocomplete="current-password" required>
+          </label>
+          <div style="margin-top: 20px;">
+            <button class="btn-donate" type="submit">ログイン</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+</body>
+</html>
