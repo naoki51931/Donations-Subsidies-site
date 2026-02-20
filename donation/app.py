@@ -37,6 +37,7 @@ default_receipt_dir = f"/tmp/donation_receipts_{os.geteuid()}"
 RECEIPT_DIR = Path(os.getenv("RECEIPT_DIR", default_receipt_dir))
 RECEIPT_DIR.mkdir(parents=True, exist_ok=True)
 BASE_DIR = Path(__file__).resolve().parent
+PUBLIC_WEB_DIR = BASE_DIR.parent
 SEAL_IMAGE_PATH = Path(os.getenv("SEAL_IMAGE_PATH", str(BASE_DIR / "assets/seals/issuer_seal.png")))
 SIGNATURE_IMAGE_PATH = Path(
     os.getenv("SIGNATURE_IMAGE_PATH", str(BASE_DIR / "assets/seals/issuer_signature.png"))
@@ -102,6 +103,21 @@ def require_dashboard_login(view_func):
     return wrapped
 
 
+def require_basic_auth(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        auth = request.authorization
+        if auth and auth.type == "basic" and auth.username == ADMIN_USERNAME and auth.password == ADMIN_PASSWORD:
+            return view_func(*args, **kwargs)
+        return (
+            "認証が必要です。",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Donation Site", charset="UTF-8"'},
+        )
+
+    return wrapped
+
+
 def public_admin_path(path: str = "") -> str:
     base = PUBLIC_DONATION_PREFIX or ""
     if path and not path.startswith("/"):
@@ -110,10 +126,44 @@ def public_admin_path(path: str = "") -> str:
 
 
 @app.route("/", methods=["GET"])
+@app.route("/index.html", methods=["GET"])
+@require_basic_auth
+def top_page():
+    return send_from_directory(str(PUBLIC_WEB_DIR), "index.html")
+
+
+@app.route("/style.css", methods=["GET"])
+@app.route("/main.js", methods=["GET"])
+@app.route("/jquery.min.js", methods=["GET"])
+@app.route("/favicon.ico", methods=["GET"])
+@require_basic_auth
+def top_assets_root():
+    return send_from_directory(str(PUBLIC_WEB_DIR), request.path.lstrip("/"))
+
+
+@app.route("/images/<path:filename>", methods=["GET"])
+@require_basic_auth
+def top_assets_images(filename: str):
+    return send_from_directory(str(PUBLIC_WEB_DIR / "images"), filename)
+
+
+@app.route("/meishi/<path:filename>", methods=["GET"])
+@require_basic_auth
+def top_assets_meishi(filename: str):
+    return send_from_directory(str(PUBLIC_WEB_DIR / "meishi"), filename)
+
+
+@app.route("/chirashi/<path:filename>", methods=["GET"])
+@require_basic_auth
+def top_assets_chirashi(filename: str):
+    return send_from_directory(str(PUBLIC_WEB_DIR / "chirashi"), filename)
+
+
 @app.route("/donation", methods=["GET"])
 @app.route("/donation/", methods=["GET"])
+@require_basic_auth
 def form_page():
-    return send_from_directory(".", "index.html")
+    return send_from_directory(str(BASE_DIR), "index.html")
 
 
 def build_receipt_pdf(
