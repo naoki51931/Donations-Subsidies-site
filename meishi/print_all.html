@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>名刺一括印刷</title>
+  <style>
+    :root {
+      --card-w: 91mm;
+      --card-h: 55mm;
+      --ink: #5a3f2a;
+      --accent: #ef8f3a;
+      --orange: #f6b25f;
+      --orange-light: #ffe4ad;
+      --paper: #ffffff;
+      --line: #f6d9b8;
+      --sheet-gap: 5mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #fffaf3;
+      font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
+      color: var(--ink);
+    }
+
+    .container {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .actions {
+      margin-bottom: 12px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      text-decoration: none;
+      color: #8f5f36;
+      background: #fff3de;
+      border: 1px solid #f0c999;
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .guide {
+      margin: 0;
+      font-size: 13px;
+      color: #b08459;
+    }
+
+    .sheet {
+      background: #fff;
+      margin: 0 auto;
+      width: fit-content;
+      display: grid;
+      grid-template-columns: repeat(2, var(--card-w));
+      gap: var(--sheet-gap);
+      padding: 0;
+    }
+
+    .card {
+      width: var(--card-w);
+      height: var(--card-h);
+      background: var(--paper);
+      border: 0.25mm solid var(--line);
+      padding: 6mm;
+      position: relative;
+      overflow: hidden;
+      break-inside: avoid;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(144deg, #fff9ef 0%, var(--orange-light) 45%, var(--orange) 100%);
+      z-index: 0;
+    }
+
+    .card::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 2.8mm;
+      height: 100%;
+      background: linear-gradient(180deg, var(--accent), var(--orange));
+      z-index: 1;
+    }
+
+    .left {
+      position: relative;
+      z-index: 2;
+      padding-right: 20mm;
+    }
+
+    .org {
+      font-size: 2.9mm;
+      letter-spacing: 0.04em;
+      margin: 0 0 0.5mm;
+      color: #b16e37;
+      font-weight: 700;
+    }
+
+    .name {
+      margin: 0;
+      font-size: 6mm;
+      line-height: 1.1;
+      font-weight: 700;
+    }
+
+    .role {
+      margin: 0 0 1.5mm;
+      font-size: 3.1mm;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      margin-top: 4.5mm;
+      display: grid;
+      gap: 0.9mm;
+      font-size: 2.6mm;
+      line-height: 1.35;
+    }
+
+    .label {
+      color: #b08459;
+      margin-right: 0.8mm;
+    }
+
+    .qr {
+      position: absolute;
+      right: 3mm;
+      bottom: 3mm;
+      z-index: 2;
+      width: 15mm;
+      height: 15mm;
+      display: block;
+    }
+
+    .qr img {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    @page {
+      size: A4 portrait;
+      margin: 10mm;
+    }
+
+    @media print {
+      html,
+      body {
+        background: #fff;
+      }
+
+      .container {
+        padding: 0;
+      }
+
+      .actions {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="actions" aria-label="印刷操作">
+      <button class="button" type="button" onclick="window.print()">このページを印刷</button>
+      <a class="button" href="./all.html">一覧に戻る</a>
+      <p class="guide">A4 / 縦 / 実際のサイズ(100%) / 余白は最小を推奨</p>
+    </section>
+
+    <section class="sheet" aria-label="全名刺一括印刷">
+      <article class="card" aria-label="南下 建一郎 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">サポートホーム施設長</p>
+          <h1 class="name">南下 建一郎</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="黒田 美代子 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">ほっこりくろちゃん施設長</p>
+          <h1 class="name">黒田 美代子</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-451-1338</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒602-0074 京都市上京区下天神町650-48</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="黒田 太一 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">サポートスタッフ</p>
+          <h1 class="name">黒田 太一</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="上田 直樹 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">サポートスタッフ</p>
+          <h1 class="name">上田 直樹</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="堀江 佑太 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">サポートスタッフ</p>
+          <h1 class="name">堀江 佑太</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="相羽 伸一 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">サポートスタッフ</p>
+          <h1 class="name">相羽 伸一</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="桑𠩤 寛行 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">テクニカルディレクター</p>
+          <h1 class="name">桑𠩤 寛行</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+
+      <article class="card" aria-label="若林 省三 名刺">
+        <div class="left">
+          <p class="org">NPO法人 ほっこり</p>
+          <p class="role">栄養管理士・調理師</p>
+          <h1 class="name">若林 省三</h1>
+          <div class="meta">
+            <div><span class="label">TEL</span>075-645-8139</div>
+            <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
+            <div><span class="label">WEB</span>https://kifukin.support-home.org/</div>
+            <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
+          </div>
+        </div>
+        <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+        </a>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
