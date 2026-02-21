@@ -167,8 +167,8 @@
                 <th>状態</th>
                 <th>確認</th>
                 <th>操作</th>
-                <th>寄付日時</th>
-                <th>作成日時</th>
+                <th>寄付日時（JST）</th>
+                <th>作成日時（JST）</th>
               </tr>
             </thead>
             <tbody>
@@ -196,7 +196,7 @@
                     >
                   </form>
                   {% if row.checked_at %}
-                  <div class="check-meta">{{ row.checked_at }} / {{ row.checked_by or "-" }}</div>
+                  <div class="check-meta">{{ row.checked_at }} JST / {{ row.checked_by or "-" }}</div>
                   {% endif %}
                 </td>
                 <td class="action-cell">
@@ -205,8 +205,8 @@
                     <button class="delete-btn" type="submit">削除</button>
                   </form>
                 </td>
-                <td>{{ row.donated_at }}</td>
-                <td>{{ row.created_at }}</td>
+                <td>{{ row.donated_at }} JST</td>
+                <td>{{ row.created_at }} JST</td>
               </tr>
               {% endfor %}
               {% if not rows %}

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>決済完了</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .hero .container {
+      padding-top: 54px;
+      padding-bottom: 54px;
+      text-align: center;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .msg {
+      margin-bottom: 14px;
+      line-height: 1.8;
+    }
+    .name {
+      font-weight: 700;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <h1>決済が完了しました</h1>
+      <p>ご寄付ありがとうございます。内容反映まで数分かかる場合があります。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container wrap">
+      <div class="card">
+        <p class="msg"><span class="name">{{ donor_name }}</span> 様、ご支援ありがとうございます。</p>
+        {% if certificate_no %}
+        <p class="msg">証明書番号：<span class="name">{{ certificate_no }}</span></p>
+        {% endif %}
+        {% if payment_status %}
+        <p class="msg">決済ステータス：<span class="name">{{ payment_status }}</span></p>
+        {% endif %}
+        {% if session_id %}
+        <p class="msg">セッションID：<span class="name">{{ session_id }}</span></p>
+        {% endif %}
+        <div class="actions">
+          {% if download_token %}
+          <a class="btn-donate" href="/donation/download/{{ download_token }}">受領書PDFをダウンロード</a>
+          {% endif %}
+          <a class="btn-donate" href="/donation/">寄付ページへ戻る</a>
+          <a class="btn-sub" href="/">トップページへ戻る</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

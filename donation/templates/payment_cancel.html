@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>決済キャンセル</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .hero .container {
+      padding-top: 54px;
+      padding-bottom: 54px;
+      text-align: center;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 22px;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <h1>決済はキャンセルされました</h1>
+      <p>内容を確認して再度お手続きください。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container wrap">
+      <div class="card">
+        <p>カード決済は完了していません。再度寄付ページからお手続きいただけます。</p>
+        <div class="actions">
+          <a class="btn-donate" href="/donation/">寄付ページへ戻る</a>
+          <a class="btn-sub" href="/">トップページへ戻る</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

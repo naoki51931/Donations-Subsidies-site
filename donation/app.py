@@ -1,14 +1,16 @@
 import io
 import os
+import re
 import smtplib
 from functools import wraps
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from urllib.parse import quote
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import pymysql
+import stripe
 from dotenv import load_dotenv
 from flask import (
     Flask,
@@ -28,6 +30,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfgen import canvas
 
 load_dotenv()
+JST = timezone(timedelta(hours=9), name="JST")
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", uuid4().hex)
@@ -62,6 +65,39 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 USER_USERNAME = os.getenv("USER_USERNAME", "user").strip() or "user"
 USER_PASSWORD = os.getenv("USER_PASSWORD", "")
 ALLOWED_PAYMENT_METHODS = {"現金", "振込", "クレジットカード"}
+def normalize_stripe_mode(value: str) -> str:
+    mode = (value or "").strip().lower()
+    if mode in {"live", "production", "prod"}:
+        return "live"
+    return "test"
+
+
+STRIPE_MODE = normalize_stripe_mode(os.getenv("STRIPE_MODE", "test"))
+LEGACY_STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
+LEGACY_STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "").strip()
+LEGACY_STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_TEST_SECRET_KEY = os.getenv("STRIPE_TEST_SECRET_KEY", "").strip()
+STRIPE_TEST_PUBLISHABLE_KEY = os.getenv("STRIPE_TEST_PUBLISHABLE_KEY", "").strip()
+STRIPE_TEST_WEBHOOK_SECRET = os.getenv("STRIPE_TEST_WEBHOOK_SECRET", "").strip()
+STRIPE_LIVE_SECRET_KEY = os.getenv("STRIPE_LIVE_SECRET_KEY", "").strip()
+STRIPE_LIVE_PUBLISHABLE_KEY = os.getenv("STRIPE_LIVE_PUBLISHABLE_KEY", "").strip()
+STRIPE_LIVE_WEBHOOK_SECRET = os.getenv("STRIPE_LIVE_WEBHOOK_SECRET", "").strip()
+if STRIPE_MODE == "live":
+    STRIPE_SECRET_KEY = STRIPE_LIVE_SECRET_KEY or LEGACY_STRIPE_SECRET_KEY
+    STRIPE_PUBLISHABLE_KEY = STRIPE_LIVE_PUBLISHABLE_KEY or LEGACY_STRIPE_PUBLISHABLE_KEY
+    STRIPE_WEBHOOK_SECRET = STRIPE_LIVE_WEBHOOK_SECRET or LEGACY_STRIPE_WEBHOOK_SECRET
+else:
+    STRIPE_SECRET_KEY = STRIPE_TEST_SECRET_KEY or LEGACY_STRIPE_SECRET_KEY
+    STRIPE_PUBLISHABLE_KEY = STRIPE_TEST_PUBLISHABLE_KEY or LEGACY_STRIPE_PUBLISHABLE_KEY
+    STRIPE_WEBHOOK_SECRET = STRIPE_TEST_WEBHOOK_SECRET or LEGACY_STRIPE_WEBHOOK_SECRET
+STRIPE_CURRENCY = (os.getenv("STRIPE_CURRENCY", "jpy").strip() or "jpy").lower()
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", "").strip()
+STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", "").strip()
+DONATION_MIN_AMOUNT = int(os.getenv("DONATION_MIN_AMOUNT", "1000"))
+DONATION_MAX_AMOUNT = int(os.getenv("DONATION_MAX_AMOUNT", "1000000"))
+
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
 
 
 def parse_multiline_env(value: str) -> str:
@@ -127,7 +163,6 @@ def public_admin_path(path: str = "") -> str:
 
 @app.route("/", methods=["GET"])
 @app.route("/index.html", methods=["GET"])
-@require_basic_auth
 def top_page():
     return send_from_directory(str(PUBLIC_WEB_DIR), "index.html")
 
@@ -136,27 +171,35 @@ def top_page():
 @app.route("/main.js", methods=["GET"])
 @app.route("/jquery.min.js", methods=["GET"])
 @app.route("/favicon.ico", methods=["GET"])
-@require_basic_auth
 def top_assets_root():
     return send_from_directory(str(PUBLIC_WEB_DIR), request.path.lstrip("/"))
 
 
 @app.route("/images/<path:filename>", methods=["GET"])
-@require_basic_auth
 def top_assets_images(filename: str):
     return send_from_directory(str(PUBLIC_WEB_DIR / "images"), filename)
 
 
 @app.route("/meishi/<path:filename>", methods=["GET"])
-@require_basic_auth
 def top_assets_meishi(filename: str):
     return send_from_directory(str(PUBLIC_WEB_DIR / "meishi"), filename)
 
 
+@app.route("/meishi", methods=["GET"])
+@app.route("/meishi/", methods=["GET"])
+def top_assets_meishi_index():
+    return send_from_directory(str(PUBLIC_WEB_DIR / "meishi"), "index.html")
+
+
 @app.route("/chirashi/<path:filename>", methods=["GET"])
-@require_basic_auth
 def top_assets_chirashi(filename: str):
     return send_from_directory(str(PUBLIC_WEB_DIR / "chirashi"), filename)
+
+
+@app.route("/chirashi", methods=["GET"])
+@app.route("/chirashi/", methods=["GET"])
+def top_assets_chirashi_index():
+    return send_from_directory(str(PUBLIC_WEB_DIR / "chirashi"), "index.html")
 
 
 @app.route("/donation", methods=["GET"])
@@ -192,7 +235,12 @@ def build_receipt_pdf(
     text.textLine("")
     text.textLine(f"寄附金額：{amount} 円")
     text.textLine(f"支払方法：{payment_method}")
-    text.textLine(f"日付：{donated_at.strftime('%Y年%m月%d日 %H:%M:%S')}")
+    # アプリ内ではJST運用。naiveな日時はJSTとして扱ってPDFへ表示する。
+    if donated_at.tzinfo is None:
+        donated_at_jst = donated_at.replace(tzinfo=JST)
+    else:
+        donated_at_jst = donated_at.astimezone(JST)
+    text.textLine(f"日付：{donated_at_jst.strftime('%Y年%m月%d日 %H:%M:%S JST')}")
     text.textLine("")
     text.textLine("受け入れ団体：NPO法人ほっこり サポートホーム／ほっこりくろちゃん")
     text.textLine("所在地：〒612-8403 京都市伏見区深草ヲカヤ町23-6 サポートホーム")
@@ -254,10 +302,27 @@ def normalize_payment_method(payment_method: str) -> str:
     return "cash"
 
 
-def build_credit_card_input_url(certificate_no: str) -> str:
+def parse_amount_yen(raw_amount: str) -> int:
+    digits_only = re.sub(r"[^\d]", "", (raw_amount or "").strip())
+    if not digits_only:
+        raise ValueError("寄付金額が不正です。")
+    amount = int(digits_only)
+    if amount < DONATION_MIN_AMOUNT or amount > DONATION_MAX_AMOUNT:
+        raise ValueError(f"寄付金額は {DONATION_MIN_AMOUNT} 〜 {DONATION_MAX_AMOUNT} 円で指定してください。")
+    return amount
+
+
+def build_public_url(path: str) -> str:
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{request.url_root.rstrip('/')}{PUBLIC_DONATION_PREFIX}{path}"
+
+
+def build_credit_card_input_url(certificate_no: str, receipt_id: int) -> str:
     base_url = CREDIT_CARD_INPUT_URL or f"{request.url_root.rstrip('/')}/donation/payment/credit-card"
+    query = urlencode({"certificate_no": certificate_no, "receipt_id": str(receipt_id)})
     separator = "&" if "?" in base_url else "?"
-    return f"{base_url}{separator}certificate_no={quote(certificate_no)}"
+    return f"{base_url}{separator}{query}"
 
 
 def send_receipt_email(
@@ -328,6 +393,7 @@ def get_db_connection():
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=False,
+        init_command="SET time_zone = '+09:00'",
     )
 
 
@@ -446,6 +512,50 @@ def ensure_receipts_table(conn) -> None:
         )
         if cur.fetchone()["cnt"] == 0:
             cur.execute("ALTER TABLE donation_receipts ADD COLUMN deleted_by VARCHAR(64) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='stripe_checkout_session_id'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN stripe_checkout_session_id VARCHAR(255) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='stripe_payment_intent_id'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN stripe_payment_intent_id VARCHAR(255) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='stripe_last_event_id'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN stripe_last_event_id VARCHAR(255) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='paid_at'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN paid_at DATETIME DEFAULT NULL")
     conn.commit()
 
 
@@ -494,9 +604,109 @@ def update_receipt_status(conn, receipt_id: int, status: str, token: str | None 
     conn.commit()
 
 
+def get_receipt_by_id(conn, receipt_id: int) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                id,
+                certificate_no,
+                donor_name,
+                donor_email,
+                amount_yen,
+                payment_method,
+                download_token,
+                status,
+                stripe_checkout_session_id,
+                stripe_payment_intent_id,
+                stripe_last_event_id
+            FROM donation_receipts
+            WHERE id=%s AND is_deleted=0
+            LIMIT 1
+            """,
+            (receipt_id,),
+        )
+        return cur.fetchone()
+
+
+def get_receipt_by_certificate_no(conn, certificate_no: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                id,
+                certificate_no,
+                donor_name,
+                donor_email,
+                amount_yen,
+                payment_method,
+                download_token,
+                status,
+                stripe_checkout_session_id,
+                stripe_payment_intent_id,
+                stripe_last_event_id
+            FROM donation_receipts
+            WHERE certificate_no=%s AND is_deleted=0
+            LIMIT 1
+            """,
+            (certificate_no,),
+        )
+        return cur.fetchone()
+
+
+def get_receipt_by_stripe_payment_intent(conn, payment_intent_id: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                id,
+                certificate_no,
+                donor_name,
+                donor_email,
+                amount_yen,
+                payment_method,
+                download_token,
+                status,
+                stripe_checkout_session_id,
+                stripe_payment_intent_id,
+                stripe_last_event_id
+            FROM donation_receipts
+            WHERE stripe_payment_intent_id=%s
+            LIMIT 1
+            """,
+            (payment_intent_id,),
+        )
+        return cur.fetchone()
+
+
+def update_receipt_payment_status(
+    conn,
+    receipt_id: int,
+    status: str,
+    checkout_session_id: str | None = None,
+    payment_intent_id: str | None = None,
+    stripe_event_id: str | None = None,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE donation_receipts
+            SET
+                status=%s,
+                stripe_checkout_session_id=COALESCE(%s, stripe_checkout_session_id),
+                stripe_payment_intent_id=COALESCE(%s, stripe_payment_intent_id),
+                stripe_last_event_id=COALESCE(%s, stripe_last_event_id),
+                paid_at=CASE WHEN %s='paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
+            WHERE id=%s
+            """,
+            (status, checkout_session_id, payment_intent_id, stripe_event_id, status, receipt_id),
+        )
+    conn.commit()
+
+
 def save_receipt(pdf_bytes: bytes) -> str:
     # Keep files for a day and clean older ones opportunistically.
-    now_ts = datetime.now().timestamp()
+    now_ts = datetime.now(JST).timestamp()
     for path in RECEIPT_DIR.glob("*.pdf"):
         try:
             if now_ts - path.stat().st_mtime > 24 * 60 * 60:
@@ -516,7 +726,7 @@ def download_receipt(token: str):
     if not receipt_path.exists():
         abort(404, description="受領書PDFが見つかりません。再度寄付フォームからお試しください。")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(JST).strftime("%Y%m%d_%H%M%S")
     return send_file(
         receipt_path,
         as_attachment=True,
@@ -858,6 +1068,196 @@ def db_check_receipts():
             conn.close()
 
 
+def validate_stripe_ready() -> None:
+    if not STRIPE_SECRET_KEY or not STRIPE_PUBLISHABLE_KEY:
+        if STRIPE_MODE == "live":
+            raise RuntimeError(
+                "Stripe本番設定が未完了です。STRIPE_LIVE_SECRET_KEY / STRIPE_LIVE_PUBLISHABLE_KEY を設定してください。"
+            )
+        raise RuntimeError(
+            "Stripeテスト設定が未完了です。STRIPE_TEST_SECRET_KEY / STRIPE_TEST_PUBLISHABLE_KEY を設定してください。"
+        )
+    if STRIPE_MODE == "test":
+        if not STRIPE_SECRET_KEY.startswith("sk_test_"):
+            raise RuntimeError("テストモードでは STRIPE_TEST_SECRET_KEY に sk_test_ を設定してください。")
+        if not STRIPE_PUBLISHABLE_KEY.startswith("pk_test_"):
+            raise RuntimeError("テストモードでは STRIPE_TEST_PUBLISHABLE_KEY に pk_test_ を設定してください。")
+        return
+    if not STRIPE_SECRET_KEY.startswith("sk_live_"):
+        raise RuntimeError("本番モードでは STRIPE_LIVE_SECRET_KEY に sk_live_ を設定してください。")
+    if not STRIPE_PUBLISHABLE_KEY.startswith("pk_live_"):
+        raise RuntimeError("本番モードでは STRIPE_LIVE_PUBLISHABLE_KEY に pk_live_ を設定してください。")
+
+
+@app.route("/api/stripe/checkout-session", methods=["POST"])
+@app.route("/donation/api/stripe/checkout-session", methods=["POST"])
+def create_checkout_session():
+    try:
+        validate_stripe_ready()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    payload = request.get_json(silent=True) or {}
+    receipt_id_raw = payload.get("receipt_id")
+    certificate_no = str(payload.get("certificate_no", "")).strip()
+    receipt_id = None
+    if receipt_id_raw not in (None, ""):
+        try:
+            receipt_id = int(str(receipt_id_raw))
+        except Exception:
+            return jsonify({"ok": False, "error": "receipt_id は数値で指定してください。"}), 400
+    if receipt_id is None and not certificate_no:
+        return jsonify({"ok": False, "error": "receipt_id または certificate_no を指定してください。"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        row = get_receipt_by_id(conn, receipt_id) if receipt_id is not None else get_receipt_by_certificate_no(conn, certificate_no)
+        if not row:
+            return jsonify({"ok": False, "error": "対象の寄付データが見つかりません。"}), 404
+        receipt_id = int(row["id"])
+        if normalize_payment_method(row["payment_method"]) != "credit_card":
+            return jsonify({"ok": False, "error": "クレジットカード決済のデータではありません。"}), 400
+        amount_yen = parse_amount_yen(row["amount_yen"])
+
+        success_url = STRIPE_SUCCESS_URL or f"{build_public_url('/payment/success')}?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = STRIPE_CANCEL_URL or build_public_url("/payment/cancel")
+
+        session_data = stripe.checkout.Session.create(
+            mode="payment",
+            payment_method_types=["card"],
+            locale="ja",
+            customer_email=row["donor_email"],
+            metadata={
+                "receipt_id": str(row["id"]),
+                "certificate_no": row["certificate_no"],
+                "donor_email": row["donor_email"],
+                "donor_name": row["donor_name"],
+            },
+            line_items=[
+                {
+                    "quantity": 1,
+                    "price_data": {
+                        "currency": STRIPE_CURRENCY,
+                        "unit_amount": amount_yen,
+                        "product_data": {"name": f"寄付金 ({row['certificate_no']})"},
+                    },
+                }
+            ],
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+
+        update_receipt_payment_status(
+            conn,
+            receipt_id=receipt_id,
+            status="checkout_created",
+            checkout_session_id=session_data.id,
+        )
+
+        return jsonify({"ok": True, "checkout_url": session_data.url, "session_id": session_data.id}), 200
+    except Exception as exc:
+        app.logger.exception("Failed to create Stripe Checkout session")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route("/api/stripe/webhook", methods=["POST"])
+@app.route("/donation/api/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    try:
+        validate_stripe_ready()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    if not STRIPE_WEBHOOK_SECRET:
+        return jsonify({"ok": False, "error": "STRIPE_WEBHOOK_SECRET が未設定です。"}), 500
+
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except ValueError:
+        return jsonify({"ok": False, "error": "Invalid payload"}), 400
+    except stripe.error.SignatureVerificationError:
+        return jsonify({"ok": False, "error": "Invalid signature"}), 400
+
+    event_type = event["type"]
+    obj = event["data"]["object"]
+    event_id = event.get("id")
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+
+        receipt_id = None
+        metadata = obj.get("metadata") or {}
+        if metadata.get("receipt_id"):
+            try:
+                receipt_id = int(metadata["receipt_id"])
+            except Exception:
+                receipt_id = None
+
+        if event_type == "checkout.session.completed":
+            payment_intent_id = obj.get("payment_intent")
+            checkout_session_id = obj.get("id")
+            if receipt_id:
+                row = get_receipt_by_id(conn, receipt_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=receipt_id,
+                        status="paid",
+                        checkout_session_id=checkout_session_id,
+                        payment_intent_id=payment_intent_id,
+                        stripe_event_id=event_id,
+                    )
+
+        elif event_type == "payment_intent.succeeded":
+            payment_intent_id = obj.get("id")
+            if not receipt_id and payment_intent_id:
+                row = get_receipt_by_stripe_payment_intent(conn, payment_intent_id)
+                receipt_id = row["id"] if row else None
+            if receipt_id:
+                row = get_receipt_by_id(conn, receipt_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=receipt_id,
+                        status="paid",
+                        payment_intent_id=payment_intent_id,
+                        stripe_event_id=event_id,
+                    )
+
+        elif event_type == "payment_intent.payment_failed":
+            payment_intent_id = obj.get("id")
+            if not receipt_id and payment_intent_id:
+                row = get_receipt_by_stripe_payment_intent(conn, payment_intent_id)
+                receipt_id = row["id"] if row else None
+            if receipt_id:
+                row = get_receipt_by_id(conn, receipt_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=receipt_id,
+                        status="payment_failed",
+                        payment_intent_id=payment_intent_id,
+                        stripe_event_id=event_id,
+                    )
+
+    except Exception:
+        app.logger.exception("Failed to process Stripe webhook")
+        return jsonify({"ok": False, "error": "Webhook handling failed"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return jsonify({"ok": True, "received": True}), 200
+
+
 @app.route("/submit", methods=["POST"])
 @app.route("/submit/", methods=["POST"])
 @app.route("/donation/submit", methods=["POST"])
@@ -875,7 +1275,7 @@ def submit():
     if payment_method not in ALLOWED_PAYMENT_METHODS:
         abort(400, description="payment_method は 現金 / 振込 / クレジットカード のみ指定できます。")
 
-    donated_at = datetime.now()
+    donated_at = datetime.now(JST).replace(tzinfo=None)
 
     conn = None
     try:
@@ -910,7 +1310,7 @@ def submit():
         certificate_no=certificate_no,
     )
 
-    credit_card_input_url = build_credit_card_input_url(certificate_no)
+    credit_card_input_url = build_credit_card_input_url(certificate_no, receipt_id)
 
     try:
         send_receipt_email(
@@ -937,10 +1337,12 @@ def submit():
         return jsonify({"ok": False, "error": str(exc)}), 502
 
     token = save_receipt(pdf_bytes)
+    payment_kind = normalize_payment_method(payment_method)
+    issue_status = "awaiting_payment" if payment_kind == "credit_card" else "issued"
     conn = None
     try:
         conn = get_db_connection()
-        update_receipt_status(conn, receipt_id=receipt_id, status="issued", token=token)
+        update_receipt_status(conn, receipt_id=receipt_id, status=issue_status, token=token)
     except Exception:
         app.logger.exception("Failed to update receipt status")
     finally:
@@ -950,7 +1352,6 @@ def submit():
             except Exception:
                 pass
 
-    payment_kind = normalize_payment_method(payment_method)
     if payment_kind == "credit_card":
         return redirect(credit_card_input_url)
 
@@ -969,7 +1370,61 @@ def submit():
 @app.route("/donation/payment/credit-card", methods=["GET"])
 def credit_card_input_page():
     certificate_no = request.args.get("certificate_no", "").strip()
-    return render_template("credit_card.html", certificate_no=certificate_no)
+    receipt_id = request.args.get("receipt_id", "").strip()
+    return render_template(
+        "credit_card.html",
+        certificate_no=certificate_no,
+        receipt_id=receipt_id,
+    )
+
+
+@app.route("/payment/success", methods=["GET"])
+@app.route("/donation/payment/success", methods=["GET"])
+def payment_success():
+    session_id = request.args.get("session_id", "").strip()
+    certificate_no = ""
+    donor_name = "ご寄付者"
+    payment_status = ""
+    download_token = ""
+
+    if session_id and STRIPE_SECRET_KEY:
+        try:
+            session_data = stripe.checkout.Session.retrieve(session_id)
+            metadata = session_data.get("metadata") or {}
+            certificate_no = metadata.get("certificate_no", "")
+            donor_name = metadata.get("donor_name", donor_name)
+            payment_status = session_data.get("payment_status", "")
+            receipt_id_raw = metadata.get("receipt_id", "")
+            if receipt_id_raw:
+                try:
+                    receipt_id = int(receipt_id_raw)
+                    conn = get_db_connection()
+                    try:
+                        ensure_receipts_table(conn)
+                        row = get_receipt_by_id(conn, receipt_id)
+                        if row:
+                            download_token = row.get("download_token", "")
+                    finally:
+                        conn.close()
+                except Exception:
+                    app.logger.exception("Failed to load receipt token for success page")
+        except Exception:
+            app.logger.exception("Failed to retrieve checkout session for success page")
+
+    return render_template(
+        "payment_success.html",
+        session_id=session_id,
+        certificate_no=certificate_no,
+        donor_name=donor_name,
+        payment_status=payment_status,
+        download_token=download_token,
+    )
+
+
+@app.route("/payment/cancel", methods=["GET"])
+@app.route("/donation/payment/cancel", methods=["GET"])
+def payment_cancel():
+    return render_template("payment_cancel.html")
 
 
 if __name__ == "__main__":

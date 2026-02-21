@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>クレジットカード情報入力</title>
+  <title>クレジットカード決済</title>
   <link rel="stylesheet" href="/style.css">
   <style>
     .cc-hero {
@@ -20,26 +20,6 @@
       max-width: 760px;
       margin: 0 auto;
     }
-    .cc-form label {
-      display: block;
-      margin-top: 14px;
-      font-weight: 700;
-      color: #3a2a1f;
-    }
-    .cc-form input {
-      width: 100%;
-      margin-top: 8px;
-      padding: 12px 14px;
-      border: 1px solid #efdfc9;
-      border-radius: 10px;
-      background: #fff;
-      font-size: 1rem;
-    }
-    .cc-form input:focus {
-      outline: none;
-      border-color: #f28c28;
-      box-shadow: 0 0 0 3px rgba(242, 140, 40, 0.2);
-    }
     .cert {
       margin-top: 12px;
       color: #5f4b3d;
@@ -49,6 +29,17 @@
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn-donate[disabled] {
+      opacity: 0.7;
+      cursor: wait;
+    }
+    .error {
+      margin-top: 14px;
+      color: #b42318;
+      font-weight: 700;
+      min-height: 1.4em;
     }
   </style>
 </head>
@@ -56,8 +47,8 @@
   <header class="cc-hero">
     <div class="light-rays"></div>
     <div class="container">
-      <h1>クレジットカード情報入力</h1>
-      <p>以下にカード情報をご入力ください。</p>
+      <h1>クレジットカード決済</h1>
+      <p>このページではカード番号を入力しません。Stripeの決済画面で入力します。</p>
       {% if certificate_no %}
       <p class="cert">証明書番号: {{ certificate_no }}</p>
       {% endif %}
@@ -67,31 +58,57 @@
   <section class="section bg-light">
     <div class="container cc-wrap">
       <div class="card">
-        <form class="cc-form" method="GET" action="/donation/">
-          <label>
-            カード名義
-            <input type="text" name="card_holder" autocomplete="cc-name" required>
-          </label>
-          <label>
-            カード番号
-            <input type="text" name="card_number" autocomplete="cc-number" inputmode="numeric" required>
-          </label>
-          <label>
-            有効期限 (MM/YY)
-            <input type="text" name="card_exp" autocomplete="cc-exp" required>
-          </label>
-          <label>
-            セキュリティコード
-            <input type="text" name="card_cvc" autocomplete="cc-csc" inputmode="numeric" required>
-          </label>
-          <p class="cert">決済処理は現在準備中です。入力後は寄付ページへ戻れます。</p>
-          <div class="actions">
-            <button class="btn-donate" type="submit">寄付ページへ戻る</button>
-            <a class="btn-sub" href="/donation/">寄付ページへ戻る</a>
-          </div>
-        </form>
+        <p>数秒でStripe決済画面へ自動遷移します。遷移しない場合はボタンを押してください。</p>
+        <div class="actions">
+          <button class="btn-donate" id="checkout-btn" type="button">Stripe決済画面へ進む</button>
+          <a class="btn-sub" href="/donation/">寄付ページへ戻る</a>
+        </div>
+        <p class="error" id="checkout-error"></p>
       </div>
     </div>
   </section>
+
+  <script>
+    (function () {
+      const receiptIdRaw = "{{ receipt_id|default('', true) }}".trim();
+      const receiptId = receiptIdRaw ? Number(receiptIdRaw) : null;
+      const certificateNo = "{{ certificate_no|default('', true) }}".trim();
+      const btn = document.getElementById("checkout-btn");
+      const error = document.getElementById("checkout-error");
+
+      async function startCheckout() {
+        error.textContent = "";
+        if ((receiptId === null || !Number.isInteger(receiptId) || receiptId <= 0) && !certificateNo) {
+          error.textContent = "決済情報が不足しています。寄付ページからやり直してください。";
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = "決済画面を準備中...";
+        try {
+          const res = await fetch("/donation/api/stripe/checkout-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              receipt_id: Number.isInteger(receiptId) && receiptId > 0 ? receiptId : undefined,
+              certificate_no: certificateNo || undefined
+            })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.checkout_url) {
+            throw new Error(data.error || "Checkoutの作成に失敗しました。");
+          }
+          window.location.href = data.checkout_url;
+        } catch (e) {
+          error.textContent = e.message || "決済画面の作成に失敗しました。";
+          btn.disabled = false;
+          btn.textContent = "Stripe決済画面へ進む";
+        }
+      }
+
+      btn.addEventListener("click", startCheckout);
+      startCheckout();
+    })();
+  </script>
 </body>
 </html>

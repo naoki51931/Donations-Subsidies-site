@@ -128,11 +128,11 @@
             </select>
           </label>
           <label>
-            寄付日時
+            寄付日時（JST）
             <input type="datetime-local" name="donated_at" value="{{ (row.donated_at|string)[:16]|replace(' ', 'T') if row.donated_at else '' }}" required>
           </label>
           <label>
-            作成日時
+            作成日時（JST）
             <input type="datetime-local" name="created_at" value="{{ (row.created_at|string)[:16]|replace(' ', 'T') if row.created_at else '' }}" required>
           </label>
           <div class="actions">
