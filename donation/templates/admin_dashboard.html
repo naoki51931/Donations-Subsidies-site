@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理画面</title>
   <link rel="stylesheet" href="/style.css">
@@ -163,6 +165,7 @@
                 <th>住所</th>
                 <th>メール</th>
                 <th>金額</th>
+                <th>寄付プラン</th>
                 <th>支払方法</th>
                 <th>状態</th>
                 <th>確認</th>
@@ -181,6 +184,7 @@
                 <td>{{ row.donor_address }}</td>
                 <td>{{ row.donor_email }}</td>
                 <td>{{ row.amount_yen }}</td>
+                <td>{% if row.donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</td>
                 <td>{{ row.payment_method }}</td>
                 <td>{{ row.status }}</td>
                 <td class="check-cell">
@@ -211,7 +215,7 @@
               {% endfor %}
               {% if not rows %}
               <tr>
-                <td colspan="13">データがありません。</td>
+                <td colspan="14">データがありません。</td>
               </tr>
               {% endif %}
             </tbody>

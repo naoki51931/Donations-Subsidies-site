@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <script src="/analytics.js"></script>
+  <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>寄付者マイページ</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .hero .container {
+      padding-top: 42px;
+      padding-bottom: 42px;
+    }
+    .head-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .meta {
+      color: #5f4b3d;
+      margin-top: 8px;
+      font-size: 0.95rem;
+    }
+    .logout-btn {
+      border: 1px solid #e48822;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.92rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+    th, td {
+      border-bottom: 1px solid #f0e0cd;
+      text-align: left;
+      padding: 10px 8px;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th {
+      color: #3a2a1f;
+      background: #fff7eb;
+      position: sticky;
+      top: 0;
+    }
+    .db-error {
+      margin-top: 10px;
+      color: #cc2f19;
+      font-weight: 700;
+    }
+    .mini-form {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .mini-input {
+      width: 120px;
+      padding: 6px 8px;
+      border: 1px solid #efdfc9;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .mini-btn {
+      border: 1px solid #f28c28;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .mini-btn.subtle {
+      background: #fff;
+      color: #f28c28;
+    }
+    .row-message {
+      margin-top: 6px;
+      font-size: 0.82rem;
+      color: #3a2a1f;
+      white-space: normal;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <div class="head-row">
+        <div>
+          <h1>寄付者マイページ</h1>
+          <p class="meta">ログイン中: {{ donor_name or "-" }}（{{ donor_email }}）</p>
+        </div>
+        <form method="POST" action="/donation/account/logout">
+          <button class="logout-btn" type="submit">ログアウト</button>
+        </form>
+      </div>
+      {% if db_error %}
+      <p class="db-error">DBエラー: {{ db_error }}</p>
+      {% endif %}
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container">
+      <div class="card">
+        <h2>あなたの寄付履歴</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>証明書番号</th>
+                <th>金額</th>
+                <th>プラン</th>
+                <th>支払方法</th>
+                <th>状態</th>
+                <th>寄付日時（JST）</th>
+                <th>受領書</th>
+                <th>継続管理</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+              <tr>
+                <td>{{ row.id }}</td>
+                <td>{{ row.certificate_no }}</td>
+                <td>{{ row.amount_yen }}</td>
+                <td>{% if row.donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</td>
+                <td>{{ row.payment_method }}</td>
+                <td id="status-{{ row.id }}">
+                  {% if row.status in ["subscription_cancel_scheduled", "subscription_canceled"] %}
+                  解約済み
+                  {% elif row.status == "subscription_active" %}
+                  継続中
+                  {% elif row.status == "subscription_payment_failed" %}
+                  継続課金失敗
+                  {% else %}
+                  {{ row.status }}
+                  {% endif %}
+                </td>
+                <td>{{ row.donated_at }} JST</td>
+                <td>
+                  {% if row.download_token %}
+                  <a href="/donation/download/{{ row.download_token }}">PDF</a>
+                  {% else %}
+                  -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if row.donation_plan == "monthly" and row.stripe_subscription_id and row.status not in ["subscription_cancel_scheduled", "subscription_canceled"] %}
+                  <div class="mini-form">
+                    <input class="mini-input" type="number" min="1000" step="100" id="amount-{{ row.id }}" value="{{ row.amount_yen }}">
+                    <button class="mini-btn" type="button" onclick="updateMonthlyAmount({{ row.id }})">金額変更</button>
+                    <button class="mini-btn subtle" type="button" onclick="cancelMonthly({{ row.id }})">解約</button>
+                  </div>
+                  <div class="row-message" id="msg-{{ row.id }}"></div>
+                  {% elif row.donation_plan == "monthly" and row.stripe_subscription_id and row.status in ["subscription_cancel_scheduled", "subscription_canceled"] %}
+                  <div>解約済み</div>
+                  <div class="mini-form" style="margin-top: 6px;">
+                    <button class="mini-btn" type="button" onclick="restartMonthly({{ row.id }})">再開</button>
+                  </div>
+                  <div class="row-message" id="msg-{{ row.id }}"></div>
+                  {% else %}
+                  -
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+              {% if not rows %}
+              <tr>
+                <td colspan="9">寄付履歴はありません。</td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+  <script>
+    async function updateMonthlyAmount(receiptId) {
+      const input = document.getElementById("amount-" + receiptId);
+      const message = document.getElementById("msg-" + receiptId);
+      const amount = Number(input.value || 0);
+      message.textContent = "";
+      if (!Number.isInteger(amount) || amount < 1000) {
+        message.textContent = "1000円以上で入力してください。";
+        return;
+      }
+      try {
+        const body = new URLSearchParams();
+        body.set("amount_yen", String(amount));
+        const res = await fetch("/donation/account/subscription/" + receiptId + "/amount", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body.toString()
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "更新に失敗しました。");
+        message.textContent = "金額を更新しました。次回課金から反映されます。";
+      } catch (e) {
+        message.textContent = e.message || "更新に失敗しました。";
+      }
+    }
+
+    async function cancelMonthly(receiptId) {
+      const message = document.getElementById("msg-" + receiptId);
+      const status = document.getElementById("status-" + receiptId);
+      message.textContent = "";
+      if (!window.confirm("この継続寄付を解約予約します。よろしいですか？")) return;
+      try {
+        const res = await fetch("/donation/account/subscription/" + receiptId + "/cancel", {
+          method: "POST"
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "解約に失敗しました。");
+        message.textContent = "解約を受け付けました。";
+        if (status) status.textContent = "解約済み";
+      } catch (e) {
+        message.textContent = e.message || "解約に失敗しました。";
+      }
+    }
+
+    async function restartMonthly(receiptId) {
+      const message = document.getElementById("msg-" + receiptId);
+      message.textContent = "";
+      try {
+        const res = await fetch("/donation/account/subscription/" + receiptId + "/restart", {
+          method: "POST"
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok || !data.checkout_url) {
+          throw new Error(data.error || "再開に失敗しました。");
+        }
+        window.location.href = data.checkout_url;
+      } catch (e) {
+        message.textContent = e.message || "再開に失敗しました。";
+      }
+    }
+  </script>
+</body>
+</html>

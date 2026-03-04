@@ -24,6 +24,7 @@ from flask import (
     session,
 )
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash, generate_password_hash
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
@@ -65,6 +66,28 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 USER_USERNAME = os.getenv("USER_USERNAME", "user").strip() or "user"
 USER_PASSWORD = os.getenv("USER_PASSWORD", "")
 ALLOWED_PAYMENT_METHODS = {"現金", "振込", "クレジットカード"}
+ALLOWED_DONATION_PLANS = {"one_time", "monthly"}
+NOINDEX_PATH_PREFIXES = (
+    "/admin",
+    "/account",
+    "/db-check",
+    "/download/",
+    "/submit",
+    "/api/",
+    "/donation/admin",
+    "/donation/account",
+    "/donation/download/",
+    "/donation/submit",
+    "/donation/api/",
+    "/payment/credit-card",
+    "/payment/success",
+    "/payment/cancel",
+    "/donation/payment/credit-card",
+    "/donation/payment/success",
+    "/donation/payment/cancel",
+)
+
+
 def normalize_stripe_mode(value: str) -> str:
     mode = (value or "").strip().lower()
     if mode in {"live", "production", "prod"}:
@@ -139,17 +162,12 @@ def require_dashboard_login(view_func):
     return wrapped
 
 
-def require_basic_auth(view_func):
+def require_donor_login(view_func):
     @wraps(view_func)
     def wrapped(*args, **kwargs):
-        auth = request.authorization
-        if auth and auth.type == "basic" and auth.username == ADMIN_USERNAME and auth.password == ADMIN_PASSWORD:
-            return view_func(*args, **kwargs)
-        return (
-            "認証が必要です。",
-            401,
-            {"WWW-Authenticate": 'Basic realm="Donation Site", charset="UTF-8"'},
-        )
+        if not session.get("donor_email"):
+            return redirect(f"{PUBLIC_DONATION_PREFIX}/account/login")
+        return view_func(*args, **kwargs)
 
     return wrapped
 
@@ -159,6 +177,14 @@ def public_admin_path(path: str = "") -> str:
     if path and not path.startswith("/"):
         path = f"/{path}"
     return f"{base}/admin{path}"
+
+
+@app.after_request
+def apply_robots_header(response):
+    path = request.path or ""
+    if any(path == prefix or path.startswith(prefix) for prefix in NOINDEX_PATH_PREFIXES):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
 
 
 @app.route("/", methods=["GET"])
@@ -171,6 +197,8 @@ def top_page():
 @app.route("/main.js", methods=["GET"])
 @app.route("/jquery.min.js", methods=["GET"])
 @app.route("/favicon.ico", methods=["GET"])
+@app.route("/robots.txt", methods=["GET"])
+@app.route("/sitemap.xml", methods=["GET"])
 def top_assets_root():
     return send_from_directory(str(PUBLIC_WEB_DIR), request.path.lstrip("/"))
 
@@ -204,7 +232,6 @@ def top_assets_chirashi_index():
 
 @app.route("/donation", methods=["GET"])
 @app.route("/donation/", methods=["GET"])
-@require_basic_auth
 def form_page():
     return send_from_directory(str(BASE_DIR), "index.html")
 
@@ -302,6 +329,13 @@ def normalize_payment_method(payment_method: str) -> str:
     return "cash"
 
 
+def normalize_donation_plan(plan: str) -> str:
+    value = (plan or "").strip().lower()
+    if value == "monthly":
+        return "monthly"
+    return "one_time"
+
+
 def parse_amount_yen(raw_amount: str) -> int:
     digits_only = re.sub(r"[^\d]", "", (raw_amount or "").strip())
     if not digits_only:
@@ -312,15 +346,29 @@ def parse_amount_yen(raw_amount: str) -> int:
     return amount
 
 
+def validate_account_password(raw_password: str) -> None:
+    value = raw_password or ""
+    if len(value) < 8:
+        raise ValueError("ログイン用パスワードは8文字以上で入力してください。")
+    has_upper = any(ch.isalpha() and ch.isupper() for ch in value)
+    has_lower = any(ch.isalpha() and ch.islower() for ch in value)
+    has_digit = any(ch.isdigit() for ch in value)
+    has_symbol = any(not ch.isalnum() for ch in value)
+    if not (has_upper and has_lower and has_digit and has_symbol):
+        raise ValueError("パスワードは大文字・小文字・数字・記号をすべて含めてください。")
+
+
 def build_public_url(path: str) -> str:
     if not path.startswith("/"):
         path = f"/{path}"
     return f"{request.url_root.rstrip('/')}{PUBLIC_DONATION_PREFIX}{path}"
 
 
-def build_credit_card_input_url(certificate_no: str, receipt_id: int) -> str:
+def build_credit_card_input_url(certificate_no: str, receipt_id: int, donation_plan: str = "one_time") -> str:
     base_url = CREDIT_CARD_INPUT_URL or f"{request.url_root.rstrip('/')}/donation/payment/credit-card"
-    query = urlencode({"certificate_no": certificate_no, "receipt_id": str(receipt_id)})
+    query = urlencode(
+        {"certificate_no": certificate_no, "receipt_id": str(receipt_id), "donation_plan": donation_plan}
+    )
     separator = "&" if "?" in base_url else "?"
     return f"{base_url}{separator}{query}"
 
@@ -556,7 +604,163 @@ def ensure_receipts_table(conn) -> None:
         )
         if cur.fetchone()["cnt"] == 0:
             cur.execute("ALTER TABLE donation_receipts ADD COLUMN paid_at DATETIME DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='donation_plan'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute(
+                "ALTER TABLE donation_receipts ADD COLUMN donation_plan VARCHAR(16) NOT NULL DEFAULT 'one_time'"
+            )
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='stripe_subscription_id'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN stripe_subscription_id VARCHAR(255) DEFAULT NULL")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='stripe_customer_id'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN stripe_customer_id VARCHAR(255) DEFAULT NULL")
     conn.commit()
+
+
+def ensure_donor_accounts_table(conn) -> None:
+    sql = """
+    CREATE TABLE IF NOT EXISTS donor_accounts (
+        id BIGINT NOT NULL AUTO_INCREMENT,
+        email VARCHAR(255) NOT NULL,
+        donor_name VARCHAR(255) NOT NULL DEFAULT '',
+        password_hash VARCHAR(255) NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        last_login_at DATETIME DEFAULT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    conn.commit()
+
+
+def upsert_donor_account(conn, email: str, donor_name: str, raw_password: str) -> None:
+    password_hash = generate_password_hash(raw_password)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO donor_accounts (email, donor_name, password_hash, is_active)
+            VALUES (%s, %s, %s, 1)
+            ON DUPLICATE KEY UPDATE
+                donor_name=VALUES(donor_name),
+                password_hash=VALUES(password_hash),
+                is_active=1
+            """,
+            (email, donor_name, password_hash),
+        )
+    conn.commit()
+
+
+def authenticate_donor(conn, email: str, raw_password: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, email, donor_name, password_hash, is_active
+            FROM donor_accounts
+            WHERE email=%s
+            LIMIT 1
+            """,
+            (email,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        if not row.get("is_active"):
+            return None
+        if not check_password_hash(row["password_hash"], raw_password):
+            return None
+        cur.execute("UPDATE donor_accounts SET last_login_at=NOW() WHERE id=%s", (row["id"],))
+    conn.commit()
+    return row
+
+
+def get_receipts_by_email(conn, email: str) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                id,
+                certificate_no,
+                donor_name,
+                amount_yen,
+                donation_plan,
+                payment_method,
+                status,
+                donated_at,
+                created_at,
+                download_token,
+                stripe_subscription_id
+            FROM donation_receipts
+            WHERE donor_email=%s AND is_deleted=0
+            ORDER BY id DESC
+            LIMIT 100
+            """,
+            (email,),
+        )
+        return cur.fetchall()
+
+
+def sync_monthly_statuses_for_donor(conn, rows: list[dict]) -> list[dict]:
+    if not STRIPE_SECRET_KEY:
+        return rows
+    for row in rows:
+        if row.get("donation_plan") != "monthly":
+            continue
+        subscription_id = (row.get("stripe_subscription_id") or "").strip()
+        if not subscription_id:
+            continue
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            stripe_status = (subscription.get("status") or "").strip()
+            cancel_at_period_end = bool(subscription.get("cancel_at_period_end"))
+            if stripe_status == "canceled" and row.get("status") != "subscription_canceled":
+                update_receipt_payment_status(
+                    conn,
+                    receipt_id=int(row["id"]),
+                    status="subscription_canceled",
+                    subscription_id=subscription_id,
+                )
+                row["status"] = "subscription_canceled"
+            elif cancel_at_period_end and row.get("status") not in {"subscription_cancel_scheduled", "subscription_canceled"}:
+                update_receipt_payment_status(
+                    conn,
+                    receipt_id=int(row["id"]),
+                    status="subscription_cancel_scheduled",
+                    subscription_id=subscription_id,
+                )
+                row["status"] = "subscription_cancel_scheduled"
+        except Exception:
+            # Keep UI available even if Stripe synchronization fails.
+            continue
+    return rows
 
 
 def create_receipt_record(
@@ -567,6 +771,7 @@ def create_receipt_record(
     email: str,
     amount: str,
     payment_method: str,
+    donation_plan: str,
     donated_at: datetime,
 ) -> tuple[int, str]:
     with conn.cursor() as cur:
@@ -576,10 +781,10 @@ def create_receipt_record(
             """
             INSERT INTO donation_receipts (
                 certificate_no, donor_name, donor_postal_code, donor_address, donor_email, amount_yen,
-                payment_method, donated_at, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'created')
+                payment_method, donation_plan, donated_at, status
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'created')
             """,
-            (temp_certificate_no, name, postal_code, address, email, amount, payment_method, donated_at),
+            (temp_certificate_no, name, postal_code, address, email, amount, payment_method, donation_plan, donated_at),
         )
         receipt_id = cur.lastrowid
         certificate_no = f"RCPT-{donated_at.year}-{receipt_id:06d}"
@@ -614,11 +819,14 @@ def get_receipt_by_id(conn, receipt_id: int) -> dict | None:
                 donor_name,
                 donor_email,
                 amount_yen,
+                donation_plan,
                 payment_method,
                 download_token,
                 status,
                 stripe_checkout_session_id,
                 stripe_payment_intent_id,
+                stripe_subscription_id,
+                stripe_customer_id,
                 stripe_last_event_id
             FROM donation_receipts
             WHERE id=%s AND is_deleted=0
@@ -639,11 +847,14 @@ def get_receipt_by_certificate_no(conn, certificate_no: str) -> dict | None:
                 donor_name,
                 donor_email,
                 amount_yen,
+                donation_plan,
                 payment_method,
                 download_token,
                 status,
                 stripe_checkout_session_id,
                 stripe_payment_intent_id,
+                stripe_subscription_id,
+                stripe_customer_id,
                 stripe_last_event_id
             FROM donation_receipts
             WHERE certificate_no=%s AND is_deleted=0
@@ -664,11 +875,14 @@ def get_receipt_by_stripe_payment_intent(conn, payment_intent_id: str) -> dict |
                 donor_name,
                 donor_email,
                 amount_yen,
+                donation_plan,
                 payment_method,
                 download_token,
                 status,
                 stripe_checkout_session_id,
                 stripe_payment_intent_id,
+                stripe_subscription_id,
+                stripe_customer_id,
                 stripe_last_event_id
             FROM donation_receipts
             WHERE stripe_payment_intent_id=%s
@@ -679,13 +893,44 @@ def get_receipt_by_stripe_payment_intent(conn, payment_intent_id: str) -> dict |
         return cur.fetchone()
 
 
+def get_receipt_by_stripe_subscription(conn, subscription_id: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                id,
+                certificate_no,
+                donor_name,
+                donor_email,
+                amount_yen,
+                donation_plan,
+                payment_method,
+                download_token,
+                status,
+                stripe_checkout_session_id,
+                stripe_payment_intent_id,
+                stripe_subscription_id,
+                stripe_customer_id,
+                stripe_last_event_id
+            FROM donation_receipts
+            WHERE stripe_subscription_id=%s
+            LIMIT 1
+            """,
+            (subscription_id,),
+        )
+        return cur.fetchone()
+
+
 def update_receipt_payment_status(
     conn,
     receipt_id: int,
     status: str,
     checkout_session_id: str | None = None,
     payment_intent_id: str | None = None,
+    subscription_id: str | None = None,
+    customer_id: str | None = None,
     stripe_event_id: str | None = None,
+    amount_yen: int | None = None,
 ) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -695,11 +940,24 @@ def update_receipt_payment_status(
                 status=%s,
                 stripe_checkout_session_id=COALESCE(%s, stripe_checkout_session_id),
                 stripe_payment_intent_id=COALESCE(%s, stripe_payment_intent_id),
+                stripe_subscription_id=COALESCE(%s, stripe_subscription_id),
+                stripe_customer_id=COALESCE(%s, stripe_customer_id),
                 stripe_last_event_id=COALESCE(%s, stripe_last_event_id),
+                amount_yen=COALESCE(%s, amount_yen),
                 paid_at=CASE WHEN %s='paid' THEN COALESCE(paid_at, NOW()) ELSE paid_at END
             WHERE id=%s
             """,
-            (status, checkout_session_id, payment_intent_id, stripe_event_id, status, receipt_id),
+            (
+                status,
+                checkout_session_id,
+                payment_intent_id,
+                subscription_id,
+                customer_id,
+                stripe_event_id,
+                str(amount_yen) if amount_yen is not None else None,
+                status,
+                receipt_id,
+            ),
         )
     conn.commit()
 
@@ -780,6 +1038,7 @@ def admin_dashboard():
                     donor_address,
                     donor_email,
                     amount_yen,
+                    donation_plan,
                     payment_method,
                     status,
                     is_checked,
@@ -832,11 +1091,80 @@ def admin_confirm(receipt_id: int):
             if checked:
                 cur.execute(
                     """
+                    SELECT
+                        id,
+                        certificate_no,
+                        donor_name,
+                        donor_address,
+                        donor_email,
+                        amount_yen,
+                        payment_method,
+                        donation_plan,
+                        donated_at,
+                        download_token,
+                        status,
+                        is_checked
+                    FROM donation_receipts
+                    WHERE id=%s AND is_deleted=0
+                    LIMIT 1
+                    """,
+                    (receipt_id,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    abort(404, description="対象データが見つかりません。")
+                if row.get("is_checked"):
+                    return redirect(public_admin_path())
+
+                donated_at = row.get("donated_at") or datetime.now(JST).replace(tzinfo=None)
+                pdf_bytes = build_receipt_pdf(
+                    name=row["donor_name"],
+                    address=row["donor_address"],
+                    amount=row["amount_yen"],
+                    payment_method=row["payment_method"],
+                    donated_at=donated_at,
+                    certificate_no=row["certificate_no"],
+                )
+                token = row.get("download_token") or save_receipt(pdf_bytes)
+                credit_card_input_url = build_credit_card_input_url(
+                    row["certificate_no"],
+                    int(row["id"]),
+                    donation_plan=normalize_donation_plan(row.get("donation_plan", "one_time")),
+                )
+                try:
+                    send_receipt_email(
+                        name=row["donor_name"],
+                        email=row["donor_email"],
+                        pdf_bytes=pdf_bytes,
+                        payment_method=row["payment_method"],
+                        credit_card_input_url=credit_card_input_url,
+                    )
+                except Exception as exc:
+                    cur.execute(
+                        """
+                        UPDATE donation_receipts
+                        SET status='mail_failed'
+                        WHERE id=%s AND is_deleted=0
+                        """,
+                        (receipt_id,),
+                    )
+                    conn.commit()
+                    return jsonify({"ok": False, "error": str(exc)}), 502
+
+                payment_kind = normalize_payment_method(row["payment_method"])
+                next_status = row.get("status") if payment_kind == "credit_card" else "issued"
+                cur.execute(
+                    """
                     UPDATE donation_receipts
-                    SET is_checked=1, checked_at=NOW(), checked_by=%s
+                    SET
+                        is_checked=1,
+                        checked_at=NOW(),
+                        checked_by=%s,
+                        status=%s,
+                        download_token=COALESCE(%s, download_token)
                     WHERE id=%s AND is_deleted=0
                     """,
-                    (current_user, receipt_id),
+                    (current_user, next_status or "created", token, receipt_id),
                 )
             else:
                 cur.execute(
@@ -994,6 +1322,282 @@ def admin_edit(receipt_id: int):
     return render_template("admin_edit.html", row=row, receipt_id=receipt_id, error=None)
 
 
+@app.route("/account/login", methods=["GET", "POST"])
+@app.route("/donation/account/login", methods=["GET", "POST"])
+def donor_account_login():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if not email or not password:
+            return render_template("account_login.html", error="メールアドレスとパスワードを入力してください。"), 400
+
+        conn = None
+        try:
+            conn = get_db_connection()
+            ensure_donor_accounts_table(conn)
+            donor = authenticate_donor(conn, email=email, raw_password=password)
+            if not donor:
+                return render_template("account_login.html", error="メールアドレスまたはパスワードが違います。"), 401
+            session["donor_email"] = donor["email"]
+            session["donor_name"] = donor.get("donor_name", "")
+            return redirect(f"{PUBLIC_DONATION_PREFIX}/account")
+        except Exception as exc:
+            return render_template("account_login.html", error=str(exc)), 500
+        finally:
+            if conn:
+                conn.close()
+
+    if session.get("donor_email"):
+        return redirect(f"{PUBLIC_DONATION_PREFIX}/account")
+    return render_template("account_login.html", error=None)
+
+
+@app.route("/account/logout", methods=["POST"])
+@app.route("/donation/account/logout", methods=["POST"])
+def donor_account_logout():
+    session.pop("donor_email", None)
+    session.pop("donor_name", None)
+    return redirect(f"{PUBLIC_DONATION_PREFIX}/account/login")
+
+
+@app.route("/account", methods=["GET"])
+@app.route("/donation/account", methods=["GET"])
+@require_donor_login
+def donor_account_dashboard():
+    donor_email = session.get("donor_email", "")
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        rows = get_receipts_by_email(conn, donor_email)
+        rows = sync_monthly_statuses_for_donor(conn, rows)
+    except Exception as exc:
+        return render_template(
+            "account_dashboard.html",
+            donor_email=donor_email,
+            donor_name=session.get("donor_name", ""),
+            rows=[],
+            db_error=str(exc),
+        )
+    finally:
+        if conn:
+            conn.close()
+
+    return render_template(
+        "account_dashboard.html",
+        donor_email=donor_email,
+        donor_name=session.get("donor_name", ""),
+        rows=rows,
+        db_error=None,
+    )
+
+
+def get_owned_receipt_for_donor(conn, receipt_id: int, donor_email: str) -> dict | None:
+    row = get_receipt_by_id(conn, receipt_id)
+    if not row:
+        return None
+    if (row.get("donor_email") or "").lower() != (donor_email or "").lower():
+        return None
+    return row
+
+
+@app.route("/account/subscription/<int:receipt_id>/amount", methods=["POST"])
+@app.route("/donation/account/subscription/<int:receipt_id>/amount", methods=["POST"])
+@require_donor_login
+def donor_update_subscription_amount(receipt_id: int):
+    donor_email = session.get("donor_email", "")
+    raw_amount = request.form.get("amount_yen", "").strip()
+    try:
+        amount_yen = parse_amount_yen(raw_amount)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    try:
+        validate_stripe_ready()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        row = get_owned_receipt_for_donor(conn, receipt_id, donor_email)
+        if not row:
+            return jsonify({"ok": False, "error": "対象データが見つかりません。"}), 404
+        if row.get("donation_plan") != "monthly":
+            return jsonify({"ok": False, "error": "月次寄付データではありません。"}), 400
+        subscription_id = (row.get("stripe_subscription_id") or "").strip()
+        if not subscription_id:
+            return jsonify({"ok": False, "error": "サブスクリプションIDが未登録です。"}), 400
+
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        subscription_status = (subscription.get("status") or "").strip()
+        if subscription_status in {"canceled", "incomplete_expired", "unpaid"}:
+            update_receipt_payment_status(
+                conn,
+                receipt_id=receipt_id,
+                status="subscription_canceled",
+                subscription_id=subscription_id,
+            )
+            return jsonify({"ok": False, "error": "この継続寄付は既に解約済みです。"}), 400
+
+        items = subscription.get("items", {}).get("data", [])
+        if not items:
+            return jsonify({"ok": False, "error": "サブスクリプション項目が見つかりません。"}), 400
+        item_id = items[0]["id"]
+
+        stripe.Subscription.modify(
+            subscription_id,
+            items=[
+                {
+                    "id": item_id,
+                    "price_data": {
+                        "currency": STRIPE_CURRENCY,
+                        "unit_amount": amount_yen,
+                        "recurring": {"interval": "month"},
+                        "product_data": {"name": f"継続寄付 ({row['certificate_no']})"},
+                    },
+                }
+            ],
+            proration_behavior="none",
+        )
+
+        update_receipt_payment_status(
+            conn,
+            receipt_id=receipt_id,
+            status="subscription_active",
+            subscription_id=subscription_id,
+            amount_yen=amount_yen,
+        )
+        return jsonify({"ok": True, "amount_yen": amount_yen}), 200
+    except Exception as exc:
+        app.logger.exception("Failed to update monthly donation amount")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route("/account/subscription/<int:receipt_id>/cancel", methods=["POST"])
+@app.route("/donation/account/subscription/<int:receipt_id>/cancel", methods=["POST"])
+@require_donor_login
+def donor_cancel_subscription(receipt_id: int):
+    donor_email = session.get("donor_email", "")
+    try:
+        validate_stripe_ready()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        row = get_owned_receipt_for_donor(conn, receipt_id, donor_email)
+        if not row:
+            return jsonify({"ok": False, "error": "対象データが見つかりません。"}), 404
+        if row.get("donation_plan") != "monthly":
+            return jsonify({"ok": False, "error": "月次寄付データではありません。"}), 400
+        subscription_id = (row.get("stripe_subscription_id") or "").strip()
+        if not subscription_id:
+            return jsonify({"ok": False, "error": "サブスクリプションIDが未登録です。"}), 400
+
+        subscription = stripe.Subscription.retrieve(subscription_id)
+        subscription_status = (subscription.get("status") or "").strip()
+        if subscription_status in {"canceled", "incomplete_expired", "unpaid"}:
+            update_receipt_payment_status(
+                conn,
+                receipt_id=receipt_id,
+                status="subscription_canceled",
+                subscription_id=subscription_id,
+            )
+            return jsonify({"ok": True, "already_canceled": True}), 200
+
+        stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+        update_receipt_payment_status(
+            conn,
+            receipt_id=receipt_id,
+            status="subscription_cancel_scheduled",
+            subscription_id=subscription_id,
+        )
+        return jsonify({"ok": True}), 200
+    except Exception as exc:
+        app.logger.exception("Failed to cancel monthly donation")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route("/account/subscription/<int:receipt_id>/restart", methods=["POST"])
+@app.route("/donation/account/subscription/<int:receipt_id>/restart", methods=["POST"])
+@require_donor_login
+def donor_restart_subscription(receipt_id: int):
+    donor_email = session.get("donor_email", "")
+    try:
+        validate_stripe_ready()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        row = get_owned_receipt_for_donor(conn, receipt_id, donor_email)
+        if not row:
+            return jsonify({"ok": False, "error": "対象データが見つかりません。"}), 404
+        if row.get("donation_plan") != "monthly":
+            return jsonify({"ok": False, "error": "月次寄付データではありません。"}), 400
+        if normalize_payment_method(row.get("payment_method", "")) != "credit_card":
+            return jsonify({"ok": False, "error": "クレジットカード以外は再開できません。"}), 400
+        if row.get("status") not in {"subscription_canceled", "subscription_cancel_scheduled"}:
+            return jsonify({"ok": False, "error": "解約済みデータのみ再開できます。"}), 400
+
+        amount_yen = parse_amount_yen(row["amount_yen"])
+        success_url = STRIPE_SUCCESS_URL or f"{build_public_url('/payment/success')}?session_id={{CHECKOUT_SESSION_ID}}"
+        cancel_url = STRIPE_CANCEL_URL or build_public_url("/payment/cancel")
+
+        session_data = stripe.checkout.Session.create(
+            mode="subscription",
+            payment_method_types=["card"],
+            locale="ja",
+            customer_email=row["donor_email"],
+            metadata={
+                "receipt_id": str(row["id"]),
+                "certificate_no": row["certificate_no"],
+                "donor_email": row["donor_email"],
+                "donor_name": row["donor_name"],
+                "donation_plan": "monthly",
+            },
+            line_items=[
+                {
+                    "quantity": 1,
+                    "price_data": {
+                        "currency": STRIPE_CURRENCY,
+                        "unit_amount": amount_yen,
+                        "recurring": {"interval": "month"},
+                        "product_data": {"name": f"継続寄付 ({row['certificate_no']})"},
+                    },
+                }
+            ],
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+
+        update_receipt_payment_status(
+            conn,
+            receipt_id=receipt_id,
+            status="checkout_created",
+            checkout_session_id=session_data.id,
+        )
+        return jsonify({"ok": True, "checkout_url": session_data.url}), 200
+    except Exception as exc:
+        app.logger.exception("Failed to restart monthly donation")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
 @app.route("/db-check", methods=["GET"])
 def db_check():
     conn = None
@@ -1120,22 +1724,23 @@ def create_checkout_session():
         if normalize_payment_method(row["payment_method"]) != "credit_card":
             return jsonify({"ok": False, "error": "クレジットカード決済のデータではありません。"}), 400
         amount_yen = parse_amount_yen(row["amount_yen"])
+        donation_plan = normalize_donation_plan(row.get("donation_plan", "one_time"))
 
         success_url = STRIPE_SUCCESS_URL or f"{build_public_url('/payment/success')}?session_id={{CHECKOUT_SESSION_ID}}"
         cancel_url = STRIPE_CANCEL_URL or build_public_url("/payment/cancel")
 
-        session_data = stripe.checkout.Session.create(
-            mode="payment",
-            payment_method_types=["card"],
-            locale="ja",
-            customer_email=row["donor_email"],
-            metadata={
+        checkout_kwargs = {
+            "payment_method_types": ["card"],
+            "locale": "ja",
+            "customer_email": row["donor_email"],
+            "metadata": {
                 "receipt_id": str(row["id"]),
                 "certificate_no": row["certificate_no"],
                 "donor_email": row["donor_email"],
                 "donor_name": row["donor_name"],
+                "donation_plan": donation_plan,
             },
-            line_items=[
+            "line_items": [
                 {
                     "quantity": 1,
                     "price_data": {
@@ -1145,9 +1750,16 @@ def create_checkout_session():
                     },
                 }
             ],
-            success_url=success_url,
-            cancel_url=cancel_url,
-        )
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+        }
+        if donation_plan == "monthly":
+            checkout_kwargs["mode"] = "subscription"
+            checkout_kwargs["line_items"][0]["price_data"]["recurring"] = {"interval": "month"}
+        else:
+            checkout_kwargs["mode"] = "payment"
+
+        session_data = stripe.checkout.Session.create(**checkout_kwargs)
 
         update_receipt_payment_status(
             conn,
@@ -1156,7 +1768,14 @@ def create_checkout_session():
             checkout_session_id=session_data.id,
         )
 
-        return jsonify({"ok": True, "checkout_url": session_data.url, "session_id": session_data.id}), 200
+        return jsonify(
+            {
+                "ok": True,
+                "checkout_url": session_data.url,
+                "session_id": session_data.id,
+                "donation_plan": donation_plan,
+            }
+        ), 200
     except Exception as exc:
         app.logger.exception("Failed to create Stripe Checkout session")
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -1204,15 +1823,24 @@ def stripe_webhook():
         if event_type == "checkout.session.completed":
             payment_intent_id = obj.get("payment_intent")
             checkout_session_id = obj.get("id")
+            subscription_id = obj.get("subscription")
+            customer_id = obj.get("customer")
+            payment_status = obj.get("payment_status", "")
+            metadata_plan = normalize_donation_plan((metadata.get("donation_plan") or "one_time"))
             if receipt_id:
                 row = get_receipt_by_id(conn, receipt_id)
                 if row and row.get("stripe_last_event_id") != event_id:
+                    status = "paid"
+                    if metadata_plan == "monthly":
+                        status = "subscription_active" if payment_status == "paid" else "subscription_started"
                     update_receipt_payment_status(
                         conn,
                         receipt_id=receipt_id,
-                        status="paid",
+                        status=status,
                         checkout_session_id=checkout_session_id,
                         payment_intent_id=payment_intent_id,
+                        subscription_id=subscription_id,
+                        customer_id=customer_id,
                         stripe_event_id=event_id,
                     )
 
@@ -1248,6 +1876,68 @@ def stripe_webhook():
                         stripe_event_id=event_id,
                     )
 
+        elif event_type == "invoice.paid":
+            subscription_id = obj.get("subscription")
+            if subscription_id:
+                row = get_receipt_by_stripe_subscription(conn, subscription_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=row["id"],
+                        status="subscription_active",
+                        subscription_id=subscription_id,
+                        stripe_event_id=event_id,
+                    )
+
+        elif event_type == "invoice.payment_failed":
+            subscription_id = obj.get("subscription")
+            if subscription_id:
+                row = get_receipt_by_stripe_subscription(conn, subscription_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=row["id"],
+                        status="subscription_payment_failed",
+                        subscription_id=subscription_id,
+                        stripe_event_id=event_id,
+                    )
+
+        elif event_type == "customer.subscription.deleted":
+            subscription_id = obj.get("id")
+            if subscription_id:
+                row = get_receipt_by_stripe_subscription(conn, subscription_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    update_receipt_payment_status(
+                        conn,
+                        receipt_id=row["id"],
+                        status="subscription_canceled",
+                        subscription_id=subscription_id,
+                        stripe_event_id=event_id,
+                    )
+
+        elif event_type == "customer.subscription.updated":
+            subscription_id = obj.get("id")
+            if subscription_id:
+                row = get_receipt_by_stripe_subscription(conn, subscription_id)
+                if row and row.get("stripe_last_event_id") != event_id:
+                    stripe_status = (obj.get("status") or "").strip()
+                    cancel_at_period_end = bool(obj.get("cancel_at_period_end"))
+                    next_status = None
+                    if stripe_status == "canceled":
+                        next_status = "subscription_canceled"
+                    elif cancel_at_period_end:
+                        next_status = "subscription_cancel_scheduled"
+                    elif stripe_status == "active":
+                        next_status = "subscription_active"
+                    if next_status:
+                        update_receipt_payment_status(
+                            conn,
+                            receipt_id=row["id"],
+                            status=next_status,
+                            subscription_id=subscription_id,
+                            stripe_event_id=event_id,
+                        )
+
     except Exception:
         app.logger.exception("Failed to process Stripe webhook")
         return jsonify({"ok": False, "error": "Webhook handling failed"}), 500
@@ -1266,7 +1956,9 @@ def submit():
     name = request.form.get("name", "匿名").strip() or "匿名"
     postal_code = request.form.get("postal_code", "").strip()
     address = request.form.get("address", "").strip()
-    email = request.form.get("email", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    account_password = request.form.get("account_password", "")
+    donation_plan = normalize_donation_plan(request.form.get("donation_plan", "one_time"))
     amount = request.form.get("amount", "").strip()
     payment_method = request.form.get("payment_method", "未指定").strip() or "未指定"
 
@@ -1274,6 +1966,16 @@ def submit():
         abort(400, description="postal_code / address / email / amount は必須です。")
     if payment_method not in ALLOWED_PAYMENT_METHODS:
         abort(400, description="payment_method は 現金 / 振込 / クレジットカード のみ指定できます。")
+    if donation_plan not in ALLOWED_DONATION_PLANS:
+        abort(400, description="donation_plan は one_time / monthly のみ指定できます。")
+    if donation_plan == "monthly" and payment_method != "クレジットカード":
+        abort(400, description="継続寄付（月次）はクレジットカードのみ対応です。")
+    if not account_password:
+        abort(400, description="ログイン用パスワードは必須です。")
+    try:
+        validate_account_password(account_password)
+    except ValueError as exc:
+        abort(400, description=str(exc))
 
     donated_at = datetime.now(JST).replace(tzinfo=None)
 
@@ -1281,6 +1983,7 @@ def submit():
     try:
         conn = get_db_connection()
         ensure_receipts_table(conn)
+        ensure_donor_accounts_table(conn)
         receipt_id, certificate_no = create_receipt_record(
             conn=conn,
             name=name,
@@ -1289,8 +1992,10 @@ def submit():
             email=email,
             amount=amount,
             payment_method=payment_method,
+            donation_plan=donation_plan,
             donated_at=donated_at,
         )
+        upsert_donor_account(conn, email=email, donor_name=name, raw_password=account_password)
     except Exception as exc:
         app.logger.exception("Failed to create receipt record")
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -1301,48 +2006,66 @@ def submit():
             except Exception:
                 pass
 
-    pdf_bytes = build_receipt_pdf(
-        name=name,
-        address=address,
-        amount=amount,
-        payment_method=payment_method,
-        donated_at=donated_at,
-        certificate_no=certificate_no,
-    )
-
-    credit_card_input_url = build_credit_card_input_url(certificate_no, receipt_id)
-
-    try:
-        send_receipt_email(
-            name=name,
-            email=email,
-            pdf_bytes=pdf_bytes,
-            payment_method=payment_method,
-            credit_card_input_url=credit_card_input_url,
-        )
-    except Exception as exc:
-        app.logger.exception("Failed to send receipt email")
-        conn = None
-        try:
-            conn = get_db_connection()
-            update_receipt_status(conn, receipt_id=receipt_id, status="mail_failed")
-        except Exception:
-            pass
-        finally:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-        return jsonify({"ok": False, "error": str(exc)}), 502
-
-    token = save_receipt(pdf_bytes)
     payment_kind = normalize_payment_method(payment_method)
-    issue_status = "awaiting_payment" if payment_kind == "credit_card" else "issued"
+    token = None
+    if payment_kind == "credit_card":
+        pdf_bytes = build_receipt_pdf(
+            name=name,
+            address=address,
+            amount=amount,
+            payment_method=payment_method,
+            donated_at=donated_at,
+            certificate_no=certificate_no,
+        )
+        token = save_receipt(pdf_bytes)
+        credit_card_input_url = build_credit_card_input_url(certificate_no, receipt_id, donation_plan=donation_plan)
+        try:
+            send_receipt_email(
+                name=name,
+                email=email,
+                pdf_bytes=pdf_bytes,
+                payment_method=payment_method,
+                credit_card_input_url=credit_card_input_url,
+            )
+        except Exception as exc:
+            app.logger.exception("Failed to send receipt email for credit-card donation")
+            conn = None
+            try:
+                conn = get_db_connection()
+                update_receipt_status(conn, receipt_id=receipt_id, status="mail_failed", token=token)
+            except Exception:
+                pass
+            finally:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            return jsonify({"ok": False, "error": str(exc)}), 502
+        issue_status = "subscription_awaiting_payment" if donation_plan == "monthly" else "awaiting_payment"
+    else:
+        issue_status = "pending_confirmation"
     conn = None
     try:
         conn = get_db_connection()
-        update_receipt_status(conn, receipt_id=receipt_id, status=issue_status, token=token)
+        if payment_kind == "credit_card":
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE donation_receipts
+                    SET
+                        status=%s,
+                        download_token=COALESCE(%s, download_token),
+                        is_checked=1,
+                        checked_at=NOW(),
+                        checked_by='system_credit_auto'
+                    WHERE id=%s
+                    """,
+                    (issue_status, token, receipt_id),
+                )
+            conn.commit()
+        else:
+            update_receipt_status(conn, receipt_id=receipt_id, status=issue_status)
     except Exception:
         app.logger.exception("Failed to update receipt status")
     finally:
@@ -1358,9 +2081,10 @@ def submit():
     return render_template(
         "thanks.html",
         name=name,
-        token=token,
+        token="",
         certificate_no=certificate_no,
         payment_method=payment_method,
+        donation_plan=donation_plan,
         payment_kind=payment_kind,
         bank_transfer_info=BANK_TRANSFER_INFO,
     )
@@ -1371,10 +2095,12 @@ def submit():
 def credit_card_input_page():
     certificate_no = request.args.get("certificate_no", "").strip()
     receipt_id = request.args.get("receipt_id", "").strip()
+    donation_plan = normalize_donation_plan(request.args.get("donation_plan", "one_time"))
     return render_template(
         "credit_card.html",
         certificate_no=certificate_no,
         receipt_id=receipt_id,
+        donation_plan=donation_plan,
     )
 
 
@@ -1386,6 +2112,7 @@ def payment_success():
     donor_name = "ご寄付者"
     payment_status = ""
     download_token = ""
+    donation_plan = "one_time"
 
     if session_id and STRIPE_SECRET_KEY:
         try:
@@ -1394,6 +2121,7 @@ def payment_success():
             certificate_no = metadata.get("certificate_no", "")
             donor_name = metadata.get("donor_name", donor_name)
             payment_status = session_data.get("payment_status", "")
+            donation_plan = normalize_donation_plan(metadata.get("donation_plan", "one_time"))
             receipt_id_raw = metadata.get("receipt_id", "")
             if receipt_id_raw:
                 try:
@@ -1418,6 +2146,7 @@ def payment_success():
         donor_name=donor_name,
         payment_status=payment_status,
         download_token=download_token,
+        donation_plan=donation_plan,
     )
 
 

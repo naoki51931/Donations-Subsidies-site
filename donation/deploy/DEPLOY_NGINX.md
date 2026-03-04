@@ -57,4 +57,25 @@ Expected:
 - `http://...` returns `301` redirect to `https://...`
 - `https://...` returns `200` (or app-specific response)
 
+## 6. Configure Basic Auth for top page
+
+`deploy/nginx/donation.conf` now protects only `/` and `/index.html` with:
+- `auth_basic "Restricted"`
+- `auth_basic_user_file /etc/nginx/.htpasswd_top`
+
+Create the password file:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y apache2-utils
+sudo htpasswd -c /etc/nginx/.htpasswd_top <username>
+```
+
+Then test and reload nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 If you use another domain, update `server_name` and the `ssl_certificate` / `ssl_certificate_key` paths in `deploy/nginx/donation.conf`.

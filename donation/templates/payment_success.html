@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>決済完了</title>
   <link rel="stylesheet" href="/style.css">
@@ -54,6 +56,7 @@
         {% if payment_status %}
         <p class="msg">決済ステータス：<span class="name">{{ payment_status }}</span></p>
         {% endif %}
+        <p class="msg">プラン：<span class="name">{% if donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</span></p>
         {% if session_id %}
         <p class="msg">セッションID：<span class="name">{{ session_id }}</span></p>
         {% endif %}
@@ -61,6 +64,7 @@
           {% if download_token %}
           <a class="btn-donate" href="/donation/download/{{ download_token }}">受領書PDFをダウンロード</a>
           {% endif %}
+          <a class="btn-donate" href="/donation/account/login">寄付者マイページ</a>
           <a class="btn-donate" href="/donation/">寄付ページへ戻る</a>
           <a class="btn-sub" href="/">トップページへ戻る</a>
         </div>

@@ -1,0 +1,19 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /account
+Disallow: /db-check
+Disallow: /download/
+Disallow: /submit
+Disallow: /api/
+Disallow: /donation/admin
+Disallow: /donation/account
+Disallow: /donation/download/
+Disallow: /donation/submit
+Disallow: /donation/api/
+Disallow: /payment/credit-card
+Disallow: /donation/payment/credit-card
+Disallow: /donation/payment/success
+Disallow: /donation/payment/cancel
+
+Sitemap: https://kifukin.support-home.org/sitemap.xml

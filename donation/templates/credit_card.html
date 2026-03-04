@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>クレジットカード決済</title>
   <link rel="stylesheet" href="/style.css">
@@ -49,6 +51,7 @@
     <div class="container">
       <h1>クレジットカード決済</h1>
       <p>このページではカード番号を入力しません。Stripeの決済画面で入力します。</p>
+      <p class="cert">プラン: {% if donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</p>
       {% if certificate_no %}
       <p class="cert">証明書番号: {{ certificate_no }}</p>
       {% endif %}

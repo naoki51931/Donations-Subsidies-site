@@ -1,9 +1,14 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
     <title>寄附フォーム</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="サポートホーム／ほっこりくろちゃんの寄附フォームです。単発寄附・継続寄附に対応しています。">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="https://kifukin.support-home.org/donation/">
     <link rel="stylesheet" href="/style.css">
     <style>
         .donation-hero {
@@ -92,6 +97,21 @@
             text-decoration: underline;
         }
 
+        .password-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            color: #3a2a1f;
+            font-weight: 600;
+        }
+
+        .password-toggle input {
+            width: auto;
+            margin: 0;
+            padding: 0;
+        }
+
         @media (max-width: 640px) {
             .donation-hero h1 {
                 font-size: 1.8rem;
@@ -104,7 +124,7 @@
     <div class="light-rays"></div>
     <div class="container">
         <h1>寄附フォーム</h1>
-        <p>ご支援ありがとうございます。必要事項をご入力のうえ送信してください。受領書PDFはメール送付され、送信後の画面からもダウンロードできます。</p>
+        <p>ご支援ありがとうございます。必要事項をご入力のうえ送信してください。現金・振込は管理側確認後、クレジットカードは確認不要で受領書メールとPDFダウンロードをご利用いただけます。</p>
     </div>
 </header>
 
@@ -123,13 +143,23 @@
                 </label>
 
                 <label class="form-label">
+                    ログイン用パスワード（必須）
+                    <input class="form-input" type="password" name="account_password" id="account-password" minlength="8" required placeholder="例: Abcd1234@" aria-describedby="password-rule">
+                </label>
+                <label class="password-toggle" for="show-account-password">
+                    <input id="show-account-password" type="checkbox">
+                    パスワードを表示
+                </label>
+                <p class="help-text" id="password-rule">8文字以上かつ「大文字・小文字・数字・記号」をすべて含めてください。</p>
+
+                <label class="form-label">
                     郵便番号
-                    <input class="form-input" type="text" name="postal_code" required placeholder="例: 612-8403">
+                    <input class="form-input" type="text" name="postal_code" id="postal-code" required placeholder="例: 612-8403" inputmode="numeric" autocomplete="postal-code">
                 </label>
 
                 <label class="form-label">
                     ご住所
-                    <input class="form-input" type="text" name="address" required placeholder="例: 京都市伏見区...">
+                    <input class="form-input" type="text" name="address" id="address" required placeholder="例: 京都市伏見区..." autocomplete="street-address">
                 </label>
 
                 <label class="form-label">
@@ -138,15 +168,23 @@
                 </label>
 
                 <label class="form-label">
+                    寄付プラン
+                    <select class="form-select" name="donation_plan" id="donation-plan">
+                        <option value="one_time">今回のみ</option>
+                        <option value="monthly">毎月（継続）</option>
+                    </select>
+                </label>
+
+                <label class="form-label">
                     支払方法
-                    <select class="form-select" name="payment_method">
+                    <select class="form-select" name="payment_method" id="payment-method">
                         <option value="現金">現金</option>
                         <option value="振込">振込</option>
                         <option value="クレジットカード">クレジットカード</option>
                     </select>
                 </label>
 
-                <p class="help-text">送信後に確認ページが表示されます。</p>
+                <p class="help-text">送信後に確認ページが表示されます。現金・振込は管理側確認後、クレジットカードは確認不要で受領書メール送信・PDFダウンロードが有効になります。</p>
                 <div class="submit-row">
                     <button class="btn-donate large" type="submit">寄附する</button>
                     <a class="home-link" href="/">トップページへ戻る</a>
@@ -155,5 +193,72 @@
         </div>
     </div>
 </section>
+<script>
+  (function () {
+    const plan = document.getElementById("donation-plan");
+    const payment = document.getElementById("payment-method");
+    const password = document.getElementById("account-password");
+    const showAccountPassword = document.getElementById("show-account-password");
+    const postalCode = document.getElementById("postal-code");
+    const address = document.getElementById("address");
+    if (!plan || !payment || !password) return;
+
+    if (showAccountPassword) {
+      showAccountPassword.addEventListener("change", function () {
+        password.type = showAccountPassword.checked ? "text" : "password";
+      });
+    }
+
+    function syncPlan() {
+      if (plan.value === "monthly") {
+        payment.value = "クレジットカード";
+        Array.from(payment.options).forEach(function (option) {
+          option.disabled = option.value !== "クレジットカード";
+        });
+        return;
+      }
+      Array.from(payment.options).forEach(function (option) {
+        option.disabled = false;
+      });
+    }
+    plan.addEventListener("change", syncPlan);
+    syncPlan();
+
+    if (postalCode && address) {
+      let lookupTimer = null;
+      let lastZipcode = "";
+
+      async function fillAddressByZipcode() {
+        const normalizedPostal = (postalCode.value || "")
+          .replace(/[０-９]/g, function (ch) {
+            return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+          })
+          .replace(/[ー−―‐ｰ－]/g, "-");
+        const zipcode = normalizedPostal.replace(/[^0-9]/g, "");
+        if (zipcode.length !== 7 || zipcode === lastZipcode) return;
+        lastZipcode = zipcode;
+
+        try {
+          const res = await fetch("https://zipcloud.ibsnet.co.jp/api/search?zipcode=" + zipcode);
+          const data = await res.json();
+          if (!data || data.status !== 200 || !data.results || !data.results.length) return;
+          const item = data.results[0];
+          const fullAddress = (item.address1 || "") + (item.address2 || "") + (item.address3 || "");
+          if (!address.value.trim()) {
+            address.value = fullAddress;
+          }
+        } catch (_) {
+          // Silent fallback: allow manual address input when API fails.
+        }
+      }
+
+      postalCode.addEventListener("input", function () {
+        if (lookupTimer) clearTimeout(lookupTimer);
+        lookupTimer = setTimeout(fillAddressByZipcode, 400);
+      });
+      postalCode.addEventListener("blur", fillAddressByZipcode);
+    }
+  })();
+</script>
 </body>
 </html>

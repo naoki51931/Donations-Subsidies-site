@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>寄付完了</title>
   <link rel="stylesheet" href="/style.css">
@@ -102,7 +104,7 @@
     <div class="light-rays"></div>
     <div class="container">
       <h1>寄付ありがとうございました</h1>
-      <p>あたたかいご支援に感謝します。受領書は下のボタンからダウンロードできます。</p>
+      <p>あたたかいご支援に感謝します。現金・振込は管理側確認後、クレジットカードは確認不要で受領書メール送信とPDFダウンロードが有効になります。</p>
     </div>
   </header>
 
@@ -111,8 +113,13 @@
       <div class="card">
         <p class="thanks-message"><span class="name">{{ name }}</span> 様、ご支援ありがとうございます。</p>
         <p class="thanks-message">証明書番号：<span class="name">{{ certificate_no }}</span></p>
+        <p class="thanks-message">プラン：<span class="name">{% if donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</span></p>
         <p class="thanks-message">支払方法：<span class="name">{{ payment_method }}</span></p>
-        <p class="thanks-message">受領書PDFはご入力のメールアドレスへ送信しました。</p>
+        {% if payment_kind == "credit_card" %}
+        <p class="thanks-message">受領書メールを送信しました。PDFは寄付者マイページからダウンロードできます。</p>
+        {% else %}
+        <p class="thanks-message">受領書メールは管理側で確認後に送信されます。PDFは確認後に寄付者マイページからダウンロードできます。</p>
+        {% endif %}
         {% if payment_kind == "bank_transfer" %}
         <div class="payment-box">
           <h2>お振込先情報</h2>
@@ -120,7 +127,7 @@
         </div>
         {% endif %}
         <div class="actions">
-          <a class="btn-donate" href="/download/{{ token }}">受領書PDFをダウンロード</a>
+          <a class="btn-donate" href="/donation/account/login">寄付者マイページへログイン</a>
           <a class="btn-donate" href="/donation/">寄付ページへ戻る</a>
           <a class="btn-sub" href="/">トップページへ戻る</a>
         </div>

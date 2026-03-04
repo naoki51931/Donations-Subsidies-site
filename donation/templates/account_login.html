@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <script src="/analytics.js"></script>
+  <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>寄付者ログイン</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #fff6e6 0%, #ffd075 40%, #f28c28 100%);
+    }
+    .hero .container {
+      padding-top: 54px;
+      padding-bottom: 54px;
+      text-align: center;
+    }
+    .wrap {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .form-label {
+      display: block;
+      margin-top: 16px;
+      font-weight: 700;
+      color: #3a2a1f;
+    }
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      margin-top: 8px;
+      border: 1px solid #efdfc9;
+      border-radius: 10px;
+      background: #fff;
+      font-size: 1rem;
+    }
+    .error {
+      margin-top: 14px;
+      color: #b42318;
+      font-weight: 700;
+    }
+    .actions {
+      margin-top: 24px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .password-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: #3a2a1f;
+      font-weight: 600;
+    }
+    .password-toggle input {
+      width: auto;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="light-rays"></div>
+    <div class="container">
+      <h1>寄付者マイページ ログイン</h1>
+      <p>メールアドレスとパスワードでログインできます。</p>
+    </div>
+  </header>
+
+  <section class="section bg-light">
+    <div class="container wrap">
+      <div class="card">
+        <form method="POST" action="/donation/account/login">
+          <label class="form-label">
+            メールアドレス
+            <input class="form-input" type="email" name="email" required>
+          </label>
+          <label class="form-label">
+            パスワード
+            <input class="form-input" id="account-login-password" type="password" name="password" required>
+          </label>
+          <label class="password-toggle" for="show-account-login-password">
+            <input id="show-account-login-password" type="checkbox">
+            パスワードを表示
+          </label>
+          {% if error %}
+          <p class="error">{{ error }}</p>
+          {% endif %}
+          <div class="actions">
+            <button class="btn-donate" type="submit">ログイン</button>
+            <a class="btn-sub" href="/donation/">寄付ページへ戻る</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+  <script>
+    const showAccountLoginPassword = document.getElementById("show-account-login-password");
+    const accountLoginPassword = document.getElementById("account-login-password");
+    if (showAccountLoginPassword && accountLoginPassword) {
+      showAccountLoginPassword.addEventListener("change", () => {
+        accountLoginPassword.type = showAccountLoginPassword.checked ? "text" : "password";
+      });
+    }
+  </script>
+</body>
+</html>

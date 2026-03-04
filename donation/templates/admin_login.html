@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <script src="/analytics.js"></script>
+<meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理ログイン</title>
   <link rel="stylesheet" href="/style.css">
@@ -45,6 +47,19 @@
       color: #cc2f19;
       font-weight: 700;
     }
+    .password-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      color: #3a2a1f;
+      font-weight: 600;
+    }
+    .password-toggle input {
+      width: auto;
+      margin: 0;
+      padding: 0;
+    }
   </style>
 </head>
 <body>
@@ -69,7 +84,11 @@
           </label>
           <label>
             パスワード
-            <input type="password" name="password" autocomplete="current-password" required>
+            <input id="password-input" type="password" name="password" autocomplete="current-password" required>
+          </label>
+          <label class="password-toggle" for="show-password">
+            <input id="show-password" type="checkbox">
+            パスワードを表示
           </label>
           <div style="margin-top: 20px;">
             <button class="btn-donate" type="submit">ログイン</button>
@@ -78,5 +97,14 @@
       </div>
     </div>
   </section>
+  <script>
+    const showPassword = document.getElementById("show-password");
+    const passwordInput = document.getElementById("password-input");
+    if (showPassword && passwordInput) {
+      showPassword.addEventListener("change", () => {
+        passwordInput.type = showPassword.checked ? "text" : "password";
+      });
+    }
+  </script>
 </body>
 </html>
