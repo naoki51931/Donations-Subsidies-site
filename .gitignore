@@ -1,3 +1,5 @@
 donation/venv/
 donation/__pycache__/
 donation/*.pyc
+.env
+donation/.env

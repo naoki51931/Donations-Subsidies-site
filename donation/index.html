@@ -112,6 +112,22 @@
             padding: 0;
         }
 
+        .choice-row {
+            display: flex;
+            gap: 14px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .choice-row label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 0;
+            font-weight: 600;
+            color: #3a2a1f;
+        }
+
         @media (max-width: 640px) {
             .donation-hero h1 {
                 font-size: 1.8rem;
@@ -136,6 +152,13 @@
                     お名前
                     <input class="form-input" type="text" name="name" placeholder="匿名可">
                 </label>
+                <div class="form-label">
+                    氏名の公表
+                    <div class="choice-row">
+                        <label><input type="radio" name="name_public_ok" value="1" required> 公表してよい</label>
+                        <label><input type="radio" name="name_public_ok" value="0" required checked> 公表しない</label>
+                    </div>
+                </div>
 
                 <label class="form-label">
                     メールアドレス

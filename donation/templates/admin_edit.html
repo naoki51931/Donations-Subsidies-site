@@ -95,6 +95,24 @@
             <input type="text" name="donor_name" value="{{ row.donor_name or '' }}" required>
           </label>
           <label>
+            氏名の公表可否
+            <select name="is_name_public" required>
+              <option value="1" {% if row.is_name_public %}selected{% endif %}>公表可</option>
+              <option value="0" {% if not row.is_name_public %}selected{% endif %}>公表不可</option>
+            </select>
+          </label>
+          <label>
+            担当者
+            <select name="assigned_handler" required>
+              {% if row.assigned_handler and row.assigned_handler not in handler_options %}
+              <option value="{{ row.assigned_handler }}" selected>{{ row.assigned_handler }}（旧）</option>
+              {% endif %}
+              {% for option in handler_options %}
+              <option value="{{ option }}" {% if (row.assigned_handler or '未設定') == option %}selected{% endif %}>{{ option }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
             郵便番号
             <input type="text" name="donor_postal_code" value="{{ row.donor_postal_code or '' }}" required>
           </label>

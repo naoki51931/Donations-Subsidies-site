@@ -45,6 +45,11 @@
       vertical-align: top;
       white-space: nowrap;
     }
+    .handler-cell,
+    .action-cell,
+    .check-cell {
+      white-space: normal;
+    }
     th {
       color: #3a2a1f;
       background: #fff7eb;
@@ -114,6 +119,31 @@
       display: flex;
       gap: 6px;
       align-items: center;
+      min-width: 120px;
+      flex-wrap: wrap;
+    }
+    .handler-form {
+      min-width: 130px;
+    }
+    .handler-form select {
+      width: 100%;
+      border: 1px solid #efdfc9;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 0.84rem;
+      background: #fff;
+    }
+    .handler-btn {
+      margin-top: 6px;
+      border: 1px solid #f28c28;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
     }
     .action-cell form {
       margin: 0;
@@ -129,6 +159,66 @@
       text-decoration: none;
       display: inline-block;
       margin-right: 6px;
+    }
+    .handler-master {
+      margin-top: 22px;
+      border-top: 1px solid #f0e0cd;
+      padding-top: 16px;
+    }
+    .handler-master h2 {
+      margin: 0 0 10px;
+      font-size: 1.1rem;
+      color: #3a2a1f;
+    }
+    .handler-add-form {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .handler-add-form input {
+      min-width: 220px;
+      border: 1px solid #efdfc9;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #fff;
+    }
+    .mini-btn {
+      border: 1px solid #f28c28;
+      background: #f28c28;
+      color: #fff;
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .mini-btn.subtle {
+      background: #fff;
+      color: #f28c28;
+    }
+    .handler-master-list {
+      display: grid;
+      gap: 8px;
+    }
+    .handler-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .handler-row form {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 0;
+    }
+    .handler-row input {
+      min-width: 200px;
+      border: 1px solid #efdfc9;
+      border-radius: 8px;
+      padding: 7px 10px;
+      background: #fff;
     }
   </style>
 </head>
@@ -161,6 +251,7 @@
                 <th>ID</th>
                 <th>証明書番号</th>
                 <th>名前</th>
+                <th>氏名公表</th>
                 <th>郵便番号</th>
                 <th>住所</th>
                 <th>メール</th>
@@ -169,6 +260,7 @@
                 <th>支払方法</th>
                 <th>状態</th>
                 <th>確認</th>
+                <th>担当者</th>
                 <th>操作</th>
                 <th>寄付日時（JST）</th>
                 <th>作成日時（JST）</th>
@@ -180,6 +272,7 @@
                 <td>{{ row.id }}</td>
                 <td>{{ row.certificate_no }}</td>
                 <td>{{ row.donor_name }}</td>
+                <td>{% if row.is_name_public %}可{% else %}不可{% endif %}</td>
                 <td>{{ row.donor_postal_code }}</td>
                 <td>{{ row.donor_address }}</td>
                 <td>{{ row.donor_email }}</td>
@@ -203,6 +296,19 @@
                   <div class="check-meta">{{ row.checked_at }} JST / {{ row.checked_by or "-" }}</div>
                   {% endif %}
                 </td>
+                <td class="handler-cell">
+                  <form class="handler-form" method="POST" action="/donation/admin/handler/{{ row.id }}">
+                    <select name="assigned_handler" required>
+                      {% if row.assigned_handler and row.assigned_handler not in handler_options %}
+                      <option value="{{ row.assigned_handler }}" selected>{{ row.assigned_handler }}（旧）</option>
+                      {% endif %}
+                      {% for option in handler_options %}
+                      <option value="{{ option }}" {% if (row.assigned_handler or '未設定') == option %}selected{% endif %}>{{ option }}</option>
+                      {% endfor %}
+                    </select>
+                    <button class="handler-btn" type="submit">登録</button>
+                  </form>
+                </td>
                 <td class="action-cell">
                   <a class="edit-btn" href="/donation/admin/edit/{{ row.id }}">編集</a>
                   <form method="POST" action="/donation/admin/delete/{{ row.id }}" onsubmit="return confirm('このデータを一覧から削除します（論理削除）。よろしいですか？');">
@@ -215,11 +321,34 @@
               {% endfor %}
               {% if not rows %}
               <tr>
-                <td colspan="14">データがありません。</td>
+                <td colspan="16">データがありません。</td>
               </tr>
               {% endif %}
             </tbody>
           </table>
+        </div>
+        <div class="handler-master">
+          <h2>担当者設定</h2>
+          <form class="handler-add-form" method="POST" action="/donation/admin/handlers/add">
+            <input type="text" name="handler_name" maxlength="64" placeholder="新しい担当者名" required>
+            <button class="mini-btn" type="submit">追加</button>
+          </form>
+          <div class="handler-master-list">
+            {% for handler in handlers %}
+            <div class="handler-row">
+              <form method="POST" action="/donation/admin/handlers/update/{{ handler.id }}">
+                <input type="text" name="handler_name" value="{{ handler.handler_name }}" maxlength="64" required>
+                <button class="mini-btn" type="submit">更新</button>
+              </form>
+              <form method="POST" action="/donation/admin/handlers/delete/{{ handler.id }}" onsubmit="return confirm('担当者を削除します。担当中データは未設定になります。よろしいですか？');">
+                <button class="mini-btn subtle" type="submit">削除</button>
+              </form>
+            </div>
+            {% endfor %}
+            {% if not handlers %}
+            <p class="meta">担当者はまだ登録されていません。</p>
+            {% endif %}
+          </div>
         </div>
       </div>
     </div>

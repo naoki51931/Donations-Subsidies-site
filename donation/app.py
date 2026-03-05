@@ -67,6 +67,8 @@ USER_USERNAME = os.getenv("USER_USERNAME", "user").strip() or "user"
 USER_PASSWORD = os.getenv("USER_PASSWORD", "")
 ALLOWED_PAYMENT_METHODS = {"現金", "振込", "クレジットカード"}
 ALLOWED_DONATION_PLANS = {"one_time", "monthly"}
+HANDLER_OPTIONS_RAW = os.getenv("DONATION_HANDLER_OPTIONS", "未設定,admin,user")
+HANDLER_PLACEHOLDER = "未設定"
 NOINDEX_PATH_PREFIXES = (
     "/admin",
     "/account",
@@ -141,6 +143,29 @@ def parse_multiline_env(value: str) -> str:
 
 
 BANK_TRANSFER_INFO = parse_multiline_env(os.getenv("BANK_TRANSFER_INFO", ""))
+
+
+def parse_csv_env(value: str) -> list[str]:
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def get_seed_handlers() -> list[str]:
+    seen: set[str] = set()
+    options: list[str] = []
+    for item in parse_csv_env(HANDLER_OPTIONS_RAW):
+        if item == HANDLER_PLACEHOLDER:
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        options.append(item)
+    return options
+
+
+def get_handler_options_fallback() -> list[str]:
+    options = [HANDLER_PLACEHOLDER]
+    options.extend(get_seed_handlers())
+    return options
 
 
 def get_dashboard_users() -> dict[str, str]:
@@ -451,6 +476,8 @@ def ensure_receipts_table(conn) -> None:
         id BIGINT NOT NULL AUTO_INCREMENT,
         certificate_no VARCHAR(32) NOT NULL,
         donor_name VARCHAR(255) NOT NULL,
+        is_name_public TINYINT(1) NOT NULL DEFAULT 0,
+        assigned_handler VARCHAR(64) NOT NULL DEFAULT '',
         donor_postal_code VARCHAR(16) NOT NULL,
         donor_address VARCHAR(255) NOT NULL,
         donor_email VARCHAR(255) NOT NULL,
@@ -483,6 +510,28 @@ def ensure_receipts_table(conn) -> None:
         )
         if cur.fetchone()["cnt"] == 0:
             cur.execute("ALTER TABLE donation_receipts ADD COLUMN donor_postal_code VARCHAR(16) NOT NULL DEFAULT ''")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='is_name_public'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN is_name_public TINYINT(1) NOT NULL DEFAULT 0")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='assigned_handler'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN assigned_handler VARCHAR(64) NOT NULL DEFAULT ''")
 
         cur.execute(
             """
@@ -642,6 +691,57 @@ def ensure_receipts_table(conn) -> None:
     conn.commit()
 
 
+def ensure_handlers_table(conn) -> None:
+    sql = """
+    CREATE TABLE IF NOT EXISTS donation_handlers (
+        id BIGINT NOT NULL AUTO_INCREMENT,
+        handler_name VARCHAR(64) NOT NULL,
+        sort_order INT NOT NULL DEFAULT 0,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_handler_name (handler_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql)
+        cur.execute("SELECT COUNT(*) AS cnt FROM donation_handlers WHERE is_active=1")
+        count = int(cur.fetchone()["cnt"])
+        if count == 0:
+            seed_handlers = get_seed_handlers()
+            if seed_handlers:
+                cur.executemany(
+                    """
+                    INSERT INTO donation_handlers (handler_name, sort_order, is_active)
+                    VALUES (%s, %s, 1)
+                    ON DUPLICATE KEY UPDATE is_active=1
+                    """,
+                    [(name, idx + 1) for idx, name in enumerate(seed_handlers)],
+                )
+    conn.commit()
+
+
+def get_handler_records(conn) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, handler_name, sort_order, is_active, created_at, updated_at
+            FROM donation_handlers
+            WHERE is_active=1
+            ORDER BY sort_order ASC, id ASC
+            """
+        )
+        return cur.fetchall()
+
+
+def get_handler_options(conn) -> list[str]:
+    options = [HANDLER_PLACEHOLDER]
+    records = get_handler_records(conn)
+    options.extend([row["handler_name"] for row in records])
+    return options
+
+
 def ensure_donor_accounts_table(conn) -> None:
     sql = """
     CREATE TABLE IF NOT EXISTS donor_accounts (
@@ -766,6 +866,7 @@ def sync_monthly_statuses_for_donor(conn, rows: list[dict]) -> list[dict]:
 def create_receipt_record(
     conn,
     name: str,
+    is_name_public: int,
     postal_code: str,
     address: str,
     email: str,
@@ -780,11 +881,22 @@ def create_receipt_record(
         cur.execute(
             """
             INSERT INTO donation_receipts (
-                certificate_no, donor_name, donor_postal_code, donor_address, donor_email, amount_yen,
+                certificate_no, donor_name, is_name_public, donor_postal_code, donor_address, donor_email, amount_yen,
                 payment_method, donation_plan, donated_at, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'created')
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'created')
             """,
-            (temp_certificate_no, name, postal_code, address, email, amount, payment_method, donation_plan, donated_at),
+            (
+                temp_certificate_no,
+                name,
+                is_name_public,
+                postal_code,
+                address,
+                email,
+                amount,
+                payment_method,
+                donation_plan,
+                donated_at,
+            ),
         )
         receipt_id = cur.lastrowid
         certificate_no = f"RCPT-{donated_at.year}-{receipt_id:06d}"
@@ -1025,6 +1137,7 @@ def admin_dashboard():
     try:
         conn = get_db_connection()
         ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS total FROM donation_receipts WHERE is_deleted=0")
             total = cur.fetchone()["total"]
@@ -1034,6 +1147,8 @@ def admin_dashboard():
                     id,
                     certificate_no,
                     donor_name,
+                    is_name_public,
+                    assigned_handler,
                     donor_postal_code,
                     donor_address,
                     donor_email,
@@ -1056,12 +1171,16 @@ def admin_dashboard():
                 """
             )
             rows = cur.fetchall()
+        handler_options = get_handler_options(conn)
+        handlers = get_handler_records(conn)
     except Exception as exc:
         return render_template(
             "admin_dashboard.html",
             total=0,
             rows=[],
             current_user=session.get("dashboard_user", ""),
+            handler_options=get_handler_options_fallback(),
+            handlers=[],
             db_error=str(exc),
         )
     finally:
@@ -1073,6 +1192,8 @@ def admin_dashboard():
         total=total,
         rows=rows,
         current_user=session.get("dashboard_user", ""),
+        handler_options=handler_options,
+        handlers=handlers,
         db_error=None,
     )
 
@@ -1185,6 +1306,145 @@ def admin_confirm(receipt_id: int):
     return redirect(public_admin_path())
 
 
+@app.route("/admin/handler/<int:receipt_id>", methods=["POST"])
+@app.route("/donation/admin/handler/<int:receipt_id>", methods=["POST"])
+@require_dashboard_login
+def admin_update_handler(receipt_id: int):
+    assigned_handler = request.form.get("assigned_handler", "").strip()
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
+        valid_options = set(get_handler_options(conn))
+        if assigned_handler not in valid_options:
+            return jsonify({"ok": False, "error": "担当者の値が不正です。"}), 400
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE donation_receipts
+                SET assigned_handler=%s
+                WHERE id=%s AND is_deleted=0
+                """,
+                (assigned_handler, receipt_id),
+            )
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
+@app.route("/admin/handlers/add", methods=["POST"])
+@app.route("/donation/admin/handlers/add", methods=["POST"])
+@require_dashboard_login
+def admin_add_handler():
+    handler_name = request.form.get("handler_name", "").strip()
+    if not handler_name or handler_name == HANDLER_PLACEHOLDER:
+        return jsonify({"ok": False, "error": "担当者名を入力してください。"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM donation_handlers")
+            next_order = int(cur.fetchone()["next_order"])
+            cur.execute(
+                """
+                INSERT INTO donation_handlers (handler_name, sort_order, is_active)
+                VALUES (%s, %s, 1)
+                ON DUPLICATE KEY UPDATE is_active=1
+                """,
+                (handler_name, next_order),
+            )
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
+@app.route("/admin/handlers/update/<int:handler_id>", methods=["POST"])
+@app.route("/donation/admin/handlers/update/<int:handler_id>", methods=["POST"])
+@require_dashboard_login
+def admin_update_handler_master(handler_id: int):
+    new_name = request.form.get("handler_name", "").strip()
+    if not new_name or new_name == HANDLER_PLACEHOLDER:
+        return jsonify({"ok": False, "error": "担当者名が不正です。"}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT handler_name FROM donation_handlers WHERE id=%s AND is_active=1 LIMIT 1",
+                (handler_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"ok": False, "error": "担当者が見つかりません。"}), 404
+            old_name = row["handler_name"]
+            cur.execute(
+                "UPDATE donation_handlers SET handler_name=%s WHERE id=%s",
+                (new_name, handler_id),
+            )
+            cur.execute(
+                "UPDATE donation_receipts SET assigned_handler=%s WHERE assigned_handler=%s",
+                (new_name, old_name),
+            )
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
+@app.route("/admin/handlers/delete/<int:handler_id>", methods=["POST"])
+@app.route("/donation/admin/handlers/delete/<int:handler_id>", methods=["POST"])
+@require_dashboard_login
+def admin_delete_handler_master(handler_id: int):
+    conn = None
+    try:
+        conn = get_db_connection()
+        ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT handler_name FROM donation_handlers WHERE id=%s AND is_active=1 LIMIT 1",
+                (handler_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"ok": False, "error": "担当者が見つかりません。"}), 404
+            handler_name = row["handler_name"]
+            cur.execute(
+                "UPDATE donation_receipts SET assigned_handler=%s WHERE assigned_handler=%s",
+                (HANDLER_PLACEHOLDER, handler_name),
+            )
+            cur.execute("DELETE FROM donation_handlers WHERE id=%s", (handler_id,))
+        conn.commit()
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return redirect(public_admin_path())
+
+
 @app.route("/admin/delete/<int:receipt_id>", methods=["POST"])
 @app.route("/donation/admin/delete/<int:receipt_id>", methods=["POST"])
 @require_dashboard_login
@@ -1225,12 +1485,17 @@ def admin_edit(receipt_id: int):
             raise ValueError("日時形式が不正です。") from exc
 
     conn = None
+    handler_options = get_handler_options_fallback()
     try:
         conn = get_db_connection()
         ensure_receipts_table(conn)
+        ensure_handlers_table(conn)
+        handler_options = get_handler_options(conn)
         with conn.cursor() as cur:
             if request.method == "POST":
                 donor_name = request.form.get("donor_name", "").strip() or "匿名"
+                is_name_public = 1 if request.form.get("is_name_public", "0").strip() == "1" else 0
+                assigned_handler = request.form.get("assigned_handler", "").strip()
                 donor_postal_code = request.form.get("donor_postal_code", "").strip()
                 donor_address = request.form.get("donor_address", "").strip()
                 donor_email = request.form.get("donor_email", "").strip()
@@ -1253,6 +1518,8 @@ def admin_edit(receipt_id: int):
                     raise ValueError("必須項目が未入力です。")
                 if payment_method not in ALLOWED_PAYMENT_METHODS:
                     raise ValueError("支払方法は 現金 / 振込 / クレジットカード から選択してください。")
+                if assigned_handler not in set(handler_options):
+                    raise ValueError("担当者の値が不正です。")
 
                 donated_at = parse_dt(donated_at_raw)
                 created_at = parse_dt(created_at_raw)
@@ -1262,6 +1529,8 @@ def admin_edit(receipt_id: int):
                     UPDATE donation_receipts
                     SET
                         donor_name=%s,
+                        is_name_public=%s,
+                        assigned_handler=%s,
                         donor_postal_code=%s,
                         donor_address=%s,
                         donor_email=%s,
@@ -1274,6 +1543,8 @@ def admin_edit(receipt_id: int):
                     """,
                     (
                         donor_name,
+                        is_name_public,
+                        assigned_handler,
                         donor_postal_code,
                         donor_address,
                         donor_email,
@@ -1294,6 +1565,8 @@ def admin_edit(receipt_id: int):
                     id,
                     certificate_no,
                     donor_name,
+                    is_name_public,
+                    assigned_handler,
                     donor_postal_code,
                     donor_address,
                     donor_email,
@@ -1312,14 +1585,32 @@ def admin_edit(receipt_id: int):
             if not row:
                 abort(404, description="対象データが見つかりません。")
     except ValueError as exc:
-        return render_template("admin_edit.html", row=request.form, receipt_id=receipt_id, error=str(exc)), 400
+        return render_template(
+            "admin_edit.html",
+            row=request.form,
+            receipt_id=receipt_id,
+            handler_options=handler_options,
+            error=str(exc),
+        ), 400
     except Exception as exc:
-        return render_template("admin_edit.html", row={}, receipt_id=receipt_id, error=str(exc)), 500
+        return render_template(
+            "admin_edit.html",
+            row={},
+            receipt_id=receipt_id,
+            handler_options=handler_options,
+            error=str(exc),
+        ), 500
     finally:
         if conn:
             conn.close()
 
-    return render_template("admin_edit.html", row=row, receipt_id=receipt_id, error=None)
+    return render_template(
+        "admin_edit.html",
+        row=row,
+        receipt_id=receipt_id,
+        handler_options=handler_options,
+        error=None,
+    )
 
 
 @app.route("/account/login", methods=["GET", "POST"])
@@ -1954,6 +2245,7 @@ def stripe_webhook():
 @app.route("/donation/submit/", methods=["POST"])
 def submit():
     name = request.form.get("name", "匿名").strip() or "匿名"
+    is_name_public = 1 if request.form.get("name_public_ok", "0").strip() == "1" else 0
     postal_code = request.form.get("postal_code", "").strip()
     address = request.form.get("address", "").strip()
     email = request.form.get("email", "").strip().lower()
@@ -1987,6 +2279,7 @@ def submit():
         receipt_id, certificate_no = create_receipt_record(
             conn=conn,
             name=name,
+            is_name_public=is_name_public,
             postal_code=postal_code,
             address=address,
             email=email,
