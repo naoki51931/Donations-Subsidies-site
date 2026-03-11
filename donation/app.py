@@ -285,7 +285,7 @@ def build_receipt_pdf(
     text.textLine(f"{name} 様")
     text.textLine(f"住所：{address}")
     text.textLine("")
-    text.textLine(f"寄附金額：{amount} 円")
+    text.textLine(f"寄付金額：{amount} 円")
     text.textLine(f"支払方法：{payment_method}")
     # アプリ内ではJST運用。naiveな日時はJSTとして扱ってPDFへ表示する。
     if donated_at.tzinfo is None:
@@ -412,7 +412,7 @@ def send_receipt_email(
     body_lines = [
         f"{name} 様",
         "",
-        "この度はご寄附ありがとうございます。",
+        "この度はご寄付ありがとうございます。",
         "受領書をPDFにてお送りいたします。",
         "",
     ]
@@ -480,6 +480,7 @@ def ensure_receipts_table(conn) -> None:
         assigned_handler VARCHAR(64) NOT NULL DEFAULT '',
         donor_postal_code VARCHAR(16) NOT NULL,
         donor_address VARCHAR(255) NOT NULL,
+        donor_company VARCHAR(255) NOT NULL DEFAULT '',
         donor_email VARCHAR(255) NOT NULL,
         amount_yen VARCHAR(64) NOT NULL,
         payment_method VARCHAR(64) NOT NULL,
@@ -543,6 +544,17 @@ def ensure_receipts_table(conn) -> None:
         )
         if cur.fetchone()["cnt"] == 0:
             cur.execute("ALTER TABLE donation_receipts ADD COLUMN donor_address VARCHAR(255) NOT NULL DEFAULT ''")
+
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA=%s AND TABLE_NAME='donation_receipts' AND COLUMN_NAME='donor_company'
+            """,
+            (DB_NAME,),
+        )
+        if cur.fetchone()["cnt"] == 0:
+            cur.execute("ALTER TABLE donation_receipts ADD COLUMN donor_company VARCHAR(255) NOT NULL DEFAULT ''")
 
         cur.execute(
             """
@@ -869,6 +881,7 @@ def create_receipt_record(
     is_name_public: int,
     postal_code: str,
     address: str,
+    company: str,
     email: str,
     amount: str,
     payment_method: str,
@@ -881,9 +894,9 @@ def create_receipt_record(
         cur.execute(
             """
             INSERT INTO donation_receipts (
-                certificate_no, donor_name, is_name_public, donor_postal_code, donor_address, donor_email, amount_yen,
+                certificate_no, donor_name, is_name_public, donor_postal_code, donor_address, donor_company, donor_email, amount_yen,
                 payment_method, donation_plan, donated_at, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'created')
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'created')
             """,
             (
                 temp_certificate_no,
@@ -891,6 +904,7 @@ def create_receipt_record(
                 is_name_public,
                 postal_code,
                 address,
+                company,
                 email,
                 amount,
                 payment_method,
@@ -1151,6 +1165,7 @@ def admin_dashboard():
                     assigned_handler,
                     donor_postal_code,
                     donor_address,
+                    donor_company,
                     donor_email,
                     amount_yen,
                     donation_plan,
@@ -1498,6 +1513,7 @@ def admin_edit(receipt_id: int):
                 assigned_handler = request.form.get("assigned_handler", "").strip()
                 donor_postal_code = request.form.get("donor_postal_code", "").strip()
                 donor_address = request.form.get("donor_address", "").strip()
+                donor_company = request.form.get("donor_company", "").strip()
                 donor_email = request.form.get("donor_email", "").strip()
                 amount_yen = request.form.get("amount_yen", "").strip()
                 payment_method = request.form.get("payment_method", "").strip()
@@ -1533,6 +1549,7 @@ def admin_edit(receipt_id: int):
                         assigned_handler=%s,
                         donor_postal_code=%s,
                         donor_address=%s,
+                        donor_company=%s,
                         donor_email=%s,
                         amount_yen=%s,
                         payment_method=%s,
@@ -1547,6 +1564,7 @@ def admin_edit(receipt_id: int):
                         assigned_handler,
                         donor_postal_code,
                         donor_address,
+                        donor_company,
                         donor_email,
                         amount_yen,
                         payment_method,
@@ -1569,6 +1587,7 @@ def admin_edit(receipt_id: int):
                     assigned_handler,
                     donor_postal_code,
                     donor_address,
+                    donor_company,
                     donor_email,
                     amount_yen,
                     payment_method,
@@ -2248,6 +2267,7 @@ def submit():
     is_name_public = 1 if request.form.get("name_public_ok", "0").strip() == "1" else 0
     postal_code = request.form.get("postal_code", "").strip()
     address = request.form.get("address", "").strip()
+    company = request.form.get("company", "").strip()
     email = request.form.get("email", "").strip().lower()
     account_password = request.form.get("account_password", "")
     donation_plan = normalize_donation_plan(request.form.get("donation_plan", "one_time"))
@@ -2282,6 +2302,7 @@ def submit():
             is_name_public=is_name_public,
             postal_code=postal_code,
             address=address,
+            company=company,
             email=email,
             amount=amount,
             payment_method=payment_method,

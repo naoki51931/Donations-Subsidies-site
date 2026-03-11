@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <script src="/analytics.js"></script>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YDY73GL0WF"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag("js", new Date());
+
+    gtag("config", "G-YDY73GL0WF");
+  </script>
 <meta charset="UTF-8">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -70,6 +78,12 @@
       font-size: 0.92rem;
       font-weight: 700;
       cursor: pointer;
+    }
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
     }
     .check-cell form {
       margin: 0;
@@ -220,6 +234,84 @@
       padding: 7px 10px;
       background: #fff;
     }
+    .print-vertical-root {
+      display: none;
+      text-align: left;
+    }
+    .print-vertical-item {
+      margin: 0 0 14px;
+      padding: 10px;
+      border: 1px solid #e4d8c9;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .print-vertical-item h3 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+    }
+    .print-vertical-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 0.92rem;
+    }
+    .print-vertical-table th,
+    .print-vertical-table td {
+      border: 1px solid #e7dccd;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .print-vertical-table th {
+      width: 180px;
+      background: #fff7eb;
+    }
+    @media print {
+      .no-print,
+      .handler-master {
+        display: none !important;
+      }
+      .table-wrap {
+        overflow: visible !important;
+      }
+      table {
+        table-layout: fixed;
+      }
+      th {
+        position: static;
+      }
+      th,
+      td {
+        white-space: normal !important;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+      tbody tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .hide-on-print {
+        display: none !important;
+      }
+      body.print-checked-mode tr.print-row-hidden {
+        display: none !important;
+      }
+      body.print-vertical-mode .admin-hero,
+      body.print-vertical-mode .section {
+        display: none !important;
+      }
+      body.print-vertical-mode .print-vertical-root {
+        display: block !important;
+        text-align: left !important;
+      }
+      body.print-vertical-mode .print-vertical-item {
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+    }
   </style>
 </head>
 <body>
@@ -231,9 +323,12 @@
           <h1>寄付 管理画面</h1>
           <p class="meta">ログイン中: {{ current_user }} / 合計件数: {{ total }}</p>
         </div>
-        <form method="POST" action="/donation/admin/logout">
-          <button class="logout-btn" type="submit">ログアウト</button>
-        </form>
+        <div class="toolbar-actions no-print">
+          <button id="print-checked-btn" class="logout-btn" type="button">確認済みのみ印刷</button>
+          <form method="POST" action="/donation/admin/logout">
+            <button class="logout-btn" type="submit">ログアウト</button>
+          </form>
+        </div>
       </div>
       {% if db_error %}
       <p class="db-error">DBエラー: {{ db_error }}</p>
@@ -254,14 +349,15 @@
                 <th>氏名公表</th>
                 <th>郵便番号</th>
                 <th>住所</th>
+                <th>企業名</th>
                 <th>メール</th>
                 <th>金額</th>
                 <th>寄付プラン</th>
                 <th>支払方法</th>
-                <th>状態</th>
-                <th>確認</th>
-                <th>担当者</th>
-                <th>操作</th>
+                <th class="hide-on-print">状態</th>
+                <th class="hide-on-print">確認</th>
+                <th class="hide-on-print">担当者</th>
+                <th class="hide-on-print">操作</th>
                 <th>寄付日時（JST）</th>
                 <th>作成日時（JST）</th>
               </tr>
@@ -275,12 +371,13 @@
                 <td>{% if row.is_name_public %}可{% else %}不可{% endif %}</td>
                 <td>{{ row.donor_postal_code }}</td>
                 <td>{{ row.donor_address }}</td>
+                <td>{{ row.donor_company or "-" }}</td>
                 <td>{{ row.donor_email }}</td>
                 <td>{{ row.amount_yen }}</td>
                 <td>{% if row.donation_plan == "monthly" %}毎月（継続）{% else %}今回のみ{% endif %}</td>
                 <td>{{ row.payment_method }}</td>
-                <td>{{ row.status }}</td>
-                <td class="check-cell">
+                <td class="hide-on-print">{{ row.status }}</td>
+                <td class="check-cell hide-on-print">
                   <form method="POST" action="/donation/admin/confirm/{{ row.id }}">
                     <input type="hidden" name="checked" value="0">
                     <input
@@ -296,7 +393,7 @@
                   <div class="check-meta">{{ row.checked_at }} JST / {{ row.checked_by or "-" }}</div>
                   {% endif %}
                 </td>
-                <td class="handler-cell">
+                <td class="handler-cell hide-on-print">
                   <form class="handler-form" method="POST" action="/donation/admin/handler/{{ row.id }}">
                     <select name="assigned_handler" required>
                       {% if row.assigned_handler and row.assigned_handler not in handler_options %}
@@ -309,7 +406,7 @@
                     <button class="handler-btn" type="submit">登録</button>
                   </form>
                 </td>
-                <td class="action-cell">
+                <td class="action-cell hide-on-print">
                   <a class="edit-btn" href="/donation/admin/edit/{{ row.id }}">編集</a>
                   <form method="POST" action="/donation/admin/delete/{{ row.id }}" onsubmit="return confirm('このデータを一覧から削除します（論理削除）。よろしいですか？');">
                     <button class="delete-btn" type="submit">削除</button>
@@ -321,7 +418,7 @@
               {% endfor %}
               {% if not rows %}
               <tr>
-                <td colspan="16">データがありません。</td>
+                <td colspan="17">データがありません。</td>
               </tr>
               {% endif %}
             </tbody>
@@ -353,5 +450,91 @@
       </div>
     </div>
   </section>
+  <section id="print-vertical-root" class="print-vertical-root"></section>
+  <script>
+    (function () {
+      const printBtn = document.getElementById("print-checked-btn");
+      const table = document.querySelector(".table-wrap table");
+      const printRoot = document.getElementById("print-vertical-root");
+      if (!printBtn || !table || !printRoot) return;
+
+      const clearPrintState = function () {
+        document.body.classList.remove("print-checked-mode");
+        document.body.classList.remove("print-vertical-mode");
+        table.querySelectorAll("tbody tr").forEach(function (row) {
+          row.classList.remove("print-row-hidden");
+        });
+        printRoot.innerHTML = "";
+      };
+
+      window.addEventListener("afterprint", clearPrintState);
+
+      printBtn.addEventListener("click", function () {
+        const headers = Array.from(table.querySelectorAll("thead th"))
+          .filter(function (th) {
+            return !th.classList.contains("hide-on-print");
+          })
+          .map(function (th) {
+            return (th.textContent || "").trim();
+          });
+
+        let checkedCount = 0;
+        printRoot.innerHTML = "";
+
+        table.querySelectorAll("tbody tr").forEach(function (row) {
+          const checkBox = row.querySelector(".check-box");
+          if (checkBox && checkBox.checked) {
+            row.classList.remove("print-row-hidden");
+            checkedCount += 1;
+
+            const cells = Array.from(row.querySelectorAll("td")).filter(function (td) {
+              return !td.classList.contains("hide-on-print");
+            });
+            const item = document.createElement("article");
+            item.className = "print-vertical-item";
+            const title = document.createElement("h3");
+            title.textContent = "確認済みデータ " + checkedCount;
+            item.appendChild(title);
+
+            const itemTable = document.createElement("table");
+            itemTable.className = "print-vertical-table";
+            const tbody = document.createElement("tbody");
+
+            headers.forEach(function (header, index) {
+              const tr = document.createElement("tr");
+              const th = document.createElement("th");
+              th.textContent = header || "-";
+              const td = document.createElement("td");
+              const sourceCell = cells[index];
+              td.textContent = sourceCell ? (sourceCell.textContent || "").trim() : "";
+              tr.appendChild(th);
+              tr.appendChild(td);
+              tbody.appendChild(tr);
+            });
+
+            itemTable.appendChild(tbody);
+            item.appendChild(itemTable);
+            printRoot.appendChild(item);
+          } else {
+            row.classList.add("print-row-hidden");
+          }
+        });
+
+        if (checkedCount === 0) {
+          clearPrintState();
+          alert("確認済みデータがありません。");
+          return;
+        }
+
+        document.body.classList.add("print-vertical-mode");
+        document.body.classList.add("print-checked-mode");
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            window.print();
+          });
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

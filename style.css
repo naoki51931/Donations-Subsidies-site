@@ -65,6 +65,26 @@ body {
   min-height: 320px;
 }
 
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 18px rgba(232, 107, 18, 0.16);
+  color: var(--orange-strong);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.site-brand-logo {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
 .hero-text h1 {
   font-size: 2.7rem;
   margin-bottom: 16px;
@@ -248,5 +268,16 @@ h2 {
 
   .hero-text h1 {
     font-size: 2.1rem;
+  }
+
+  .site-brand {
+    font-size: 0.95rem;
+    gap: 8px;
+    padding: 5px 10px;
+  }
+
+  .site-brand-logo {
+    width: 22px;
+    height: 22px;
   }
 }

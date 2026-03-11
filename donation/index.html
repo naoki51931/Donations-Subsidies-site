@@ -1,12 +1,20 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <script src="/analytics.js"></script>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YDY73GL0WF"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag("js", new Date());
+
+    gtag("config", "G-YDY73GL0WF");
+  </script>
 <meta charset="UTF-8">
   <link rel="icon" href="/favicon.ico" sizes="any">
-    <title>寄附フォーム</title>
+    <title>寄付フォーム</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="サポートホーム／ほっこりくろちゃんの寄附フォームです。単発寄附・継続寄附に対応しています。">
+    <meta name="description" content="サポートホーム／ほっこりくろちゃんの寄付フォームです。単発寄付・継続寄付に対応しています。">
     <meta name="robots" content="index,follow">
     <link rel="canonical" href="https://kifukin.support-home.org/donation/">
     <link rel="stylesheet" href="/style.css">
@@ -139,7 +147,7 @@
 <header class="donation-hero">
     <div class="light-rays"></div>
     <div class="container">
-        <h1>寄附フォーム</h1>
+        <h1>寄付フォーム</h1>
         <p>ご支援ありがとうございます。必要事項をご入力のうえ送信してください。現金・振込は管理側確認後、クレジットカードは確認不要で受領書メールとPDFダウンロードをご利用いただけます。</p>
     </div>
 </header>
@@ -186,7 +194,12 @@
                 </label>
 
                 <label class="form-label">
-                    寄附金額（円）
+                    企業名（任意）
+                    <input class="form-input" type="text" name="company" id="company" placeholder="例: 株式会社サンプル" autocomplete="organization">
+                </label>
+
+                <label class="form-label">
+                    寄付金額（円）
                     <input class="form-input" type="number" name="amount" required min="1">
                 </label>
 
@@ -209,7 +222,7 @@
 
                 <p class="help-text">送信後に確認ページが表示されます。現金・振込は管理側確認後、クレジットカードは確認不要で受領書メール送信・PDFダウンロードが有効になります。</p>
                 <div class="submit-row">
-                    <button class="btn-donate large" type="submit">寄附する</button>
+                    <button class="btn-donate large" type="submit">寄付する</button>
                     <a class="home-link" href="/">トップページへ戻る</a>
                 </div>
             </form>

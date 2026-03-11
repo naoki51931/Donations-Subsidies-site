@@ -1,18 +1,27 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <script src="/analytics.js"></script>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-YDY73GL0WF"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag("js", new Date());
+
+    gtag("config", "G-YDY73GL0WF");
+  </script>
 <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>名刺 | 黒田 太一</title>
   <style>
+
     :root {
       --card-w: 91mm;
       --card-h: 55mm;
-      --ink: #5a3f2a;
-      --accent: #ef8f3a;
-      --orange: #f6b25f;
-      --orange-light: #ffe4ad;
+      --ink: #3a2a1f;
+      --accent: #e86b12;
+      --orange: #f28c28;
+      --orange-light: #ffd075;
       --paper: #ffffff;
       --line: #f6d9b8;
     }
@@ -20,7 +29,7 @@
     html, body {
       margin: 0;
       padding: 0;
-      background: #fffaf3;
+      background: #fff6e6;
       font-family: "Noto Sans JP", "Yu Gothic", sans-serif;
       color: var(--ink);
     }
@@ -28,6 +37,7 @@
       min-height: 100vh;
       display: grid;
       place-items: center;
+      gap: 10px;
       padding: 24px;
     }
     .card {
@@ -58,95 +68,94 @@
       background: linear-gradient(180deg, var(--accent), var(--orange));
       z-index: 1;
     }
-    .left {
+    .left { position: relative; z-index: 2; padding-right: 20mm; }
+    .org { font-size: 2.9mm; letter-spacing: 0.04em; margin: 0 0 0.5mm; color: #b16e37; font-weight: 700; }
+    .name { margin: 0; font-size: 6mm; line-height: 1.1; font-weight: 700; }
+    .role { margin: 0 0 1.5mm; font-size: 3.1mm; color: var(--accent); font-weight: 700; }
+    .meta { margin-top: 4.5mm; display: grid; gap: 0.9mm; font-size: 2.6mm; line-height: 1.35; }
+    .label { color: #b08459; margin-right: 0.8mm; }
+    .qr { position: absolute; right: 3mm; bottom: 3mm; z-index: 2; width: 15mm; height: 15mm; display: block; }
+    .qr img { display: block; width: 100%; height: 100%; }
+
+    .card.back {
+      padding: 5.5mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card.back::before {
+      background: radial-gradient(circle at 30% 18%, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0) 38%), linear-gradient(135deg, #fff6e6 0%, #ffd075 45%, #f28c28 100%);
+    }
+    .card.back::after { display: none; }
+    .back-inner {
       position: relative;
       z-index: 2;
-      padding-right: 20mm;
-    }
-    .org {
-      font-size: 2.9mm;
-      letter-spacing: 0.04em;
-      margin: 0 0 0.5mm;
-      color: #b16e37;
-      font-weight: 700;
-    }
-    .name {
-      margin: 0;
-      font-size: 6mm;
-      line-height: 1.1;
-      font-weight: 700;
-    }
-    .role {
-      margin: 0 0 1.5mm;
-      font-size: 3.1mm;
-      color: var(--accent);
-      font-weight: 700;
-    }
-    .meta {
-      margin-top: 4.5mm;
-      display: grid;
-      gap: 0.9mm;
-      font-size: 2.6mm;
-      line-height: 1.35;
-    }
-    .label {
-      color: #b08459;
-      margin-right: 0.8mm;
-    }
-    .qr {
-      position: absolute;
-      right: 3mm;
-      bottom: 3mm;
-      z-index: 2;
-      width: 15mm;
-      height: 15mm;
-      display: block;
-    }
-    .qr img {
-      display: block;
-      width: 100%;
       height: 100%;
-    }
-    .links {
-      margin-top: 10px;
-      font-size: 13px;
-      color: #b08459;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2.1mm;
       text-align: center;
     }
-    .links a {
-      color: #b08459;
+    .logo-mark {
+      width: 22mm;
+      height: 22mm;
+      filter: drop-shadow(0 1.2mm 1.6mm rgba(232, 107, 18, 0.2));
     }
-    @page {
-      size: 91mm 55mm;
+    .tagline {
       margin: 0;
+      font-size: 3.05mm;
+      letter-spacing: 0.03em;
+      color: #7a4d2e;
+      font-weight: 700;
     }
+    .back-foot {
+      width: 100%;
+      margin-top: 0.6mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.2mm;
+    }
+    .site {
+      font-size: 2.5mm;
+      color: #8d5d39;
+      letter-spacing: 0.015em;
+      font-weight: 600;
+    }
+    .qr-mini {
+      width: 8.8mm;
+      height: 8.8mm;
+      display: block;
+      border: 0.2mm solid rgba(232, 107, 18, 0.22);
+      border-radius: 1.2mm;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.95);
+    }
+    .qr-mini img { width: 100%; height: 100%; display: block; }
+
+    @page { size: 91mm 55mm; margin: 0; }
     @media print {
-      html, body {
-        width: 91mm;
-        height: 55mm;
-        background: #fff;
-      }
-      .stage {
-        padding: 0;
-        min-height: auto;
-      }
-      .card {
-        border: none;
-      }
-      .links {
-        display: none;
-      }
+      html, body { background: #fff; }
+      .stage { padding: 0; min-height: auto; gap: 0; }
+      .card { border: none; break-after: page; }
+      .card:last-of-type { break-after: auto; }
     }
+
+    .links { margin-top: 10px; font-size: 13px; color: #b08459; text-align: center; }
+    .links a { color: #b08459; }
+    @media print { .links { display: none; } }
   </style>
 </head>
 <body>
   <main class="stage">
-    <section class="card" aria-label="名刺">
+    <section class="card" aria-label="名刺 表面">
       <div class="left">
         <p class="org">NPO法人 ほっこり</p>
         <p class="role">サポートスタッフ</p>
         <h1 class="name">黒田 太一</h1>
-
         <div class="meta">
           <div><span class="label">TEL</span>075-645-8139</div>
           <div><span class="label">MAIL</span>kyoto.s.home@gmail.com</div>
@@ -154,11 +163,36 @@
           <div><span class="label">ADDR</span>〒612-8403 京都市伏見区深草ヲカヤ町23-6</div>
         </div>
       </div>
-      <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄附金サイトQR">
-        <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=ef8f3a&bgcolor=transparent&qzone=0" alt="寄附金サイトQRコード">
+      <a class="qr" href="https://kifukin.support-home.org/" aria-label="寄付金サイトQR">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=e86b12&bgcolor=transparent&qzone=0" alt="寄付金サイトQRコード">
       </a>
     </section>
-    <p class="links"><a href="./index.html">一覧に戻る</a></p>
+
+    <section class="card back" aria-label="名刺 裏面">
+      <div class="back-inner">
+        <svg class="logo-mark" viewBox="0 0 64 64" role="img" aria-label="サポートホーム ロゴ">
+          <defs>
+            <linearGradient id="sunRise" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffd075"/>
+              <stop offset="100%" stop-color="#f28c28"/>
+            </linearGradient>
+          </defs>
+          <circle cx="32" cy="23" r="16" fill="url(#sunRise)"/>
+          <path d="M14 39 L32 22 L50 39" fill="none" stroke="#e86b12" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="20" y="39" width="24" height="16" rx="2.2" fill="#fff6e6" stroke="#e86b12" stroke-width="3"/>
+          <rect x="29" y="44" width="6" height="11" rx="1.2" fill="#f28c28"/>
+        </svg>
+        <p class="tagline">住まい・食事・つながりを支える</p>
+        <div class="back-foot">
+          <span class="site">kifukin.support-home.org</span>
+          <a class="qr-mini" href="https://kifukin.support-home.org/" aria-label="サイトQR">
+            <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https%3A%2F%2Fkifukin.support-home.org%2F&color=e86b12&bgcolor=ffffff&qzone=0" alt="サイトQRコード">
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <p class="links"><a href="./all.html">一覧に戻る</a></p>
   </main>
 </body>
 </html>
